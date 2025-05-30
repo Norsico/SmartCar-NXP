@@ -3,7 +3,6 @@ from smartcar import ticker
 from seekfree import TSL1401
 import gc
 import time
-import json
 
 ccd = TSL1401(10)
 # 调整 CCD 的采样精度为 12bit
