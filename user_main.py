@@ -12,12 +12,18 @@ ticker_flag = False
 Filter_data = [0, 0, 0]
 last_yaw = 0
 
+# CCD相关全局变量
+ccd_ticker_flag = False
+ccd_ticker_count = 0
+line_deviation = 0  # 线路偏差
+line_control_output = 0  # 线路控制输出
+
 # 硬件初始化
 end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
 end_state = end_switch.value()
 
 motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C28_DIR_C29, 13000, duty=0, invert=True)
-motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=True)
+motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False)
 
 encoder_l = encoder("C0", "C1", True)
 encoder_r = encoder("C2", "C3")
@@ -25,10 +31,19 @@ encoder_r = encoder("C2", "C3")
 imu = IMU660RX()
 imu_data = imu.get()
 
+# CCD初始化
+ccd = TSL1401(10)
+ccd.set_resolution(TSL1401.RES_12BIT)
+time.sleep_ms(500)  # CCD初始化延时
+
 # PID参数 - 进一步增强响应强度
 angle_kp, angle_ki, angle_kd = -2600.0, 0, -420.0  # 进一步增强角速度环响应
 roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
 speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
+
+# 线路跟踪PD控制器参数
+line_kp = 15  # 比例控制，快速响应
+line_kd = 5  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
@@ -65,6 +80,20 @@ class PIDController:
         self.err_last = err
         return output
 
+# PD控制器类（用于线路跟踪）
+class PDController:
+    def __init__(self, kp, kd):
+        self.kp = kp
+        self.kd = kd
+        self.err_last = 0
+    
+    def update(self, setpoint, current):
+        err = setpoint - current
+        err_diff = err - self.err_last
+        output = self.kp * err + self.kd * err_diff
+        self.err_last = err
+        return output
+
 # IMU数据类
 class IMUData:
     def __init__(self):
@@ -84,6 +113,7 @@ kalman_r = KalmanFilter()
 pid_angle_speed = PIDController(angle_kp, angle_ki, angle_kd)
 pid_angle = PIDController(roll_angle_Kp, roll_angle_Ki, roll_angle_Kd)
 pid_speed = PIDController(speed_Kp, speed_Ki, speed_Kd)
+pid_line = PDController(line_kp, line_kd)  # 线路跟踪PD控制器
 imu_data_obj = IMUData()
 quaternion = Quaternion()
 
@@ -217,7 +247,7 @@ def imu_init():
         Filter_data[i] /= 1000
 
 def control_loop(timer):
-    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data
+    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output
     
     ticker_flag = True
     ticker_count = (ticker_count + 1) % 10
@@ -228,11 +258,16 @@ def control_loop(timer):
     
     motor1 = pid_angle_speed.update(angle_1, -imu_data_obj.gyro_x)
     motor2 = motor1
+    
+    # 添加线路控制输出到电机控制
+    motor1 -= line_control_output  # 左电机增加转向控制
+    motor2 += line_control_output  # 右电机减少转向控制
+    
     motor1 = limit(motor1, -7200, 7200)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -7200, 7200)  # 增加电机输出限制，提高响应强度
     
     motor_l.duty(motor1)
-    motor_r.duty(-motor2)
+    motor_r.duty(motor2)
     
     # 5ms: 角度控制
     if ticker_count % 5 == 0:
@@ -248,31 +283,120 @@ def encoder_update(timer):
     kalman_l.update(encoder_l.get())
     kalman_r.update(encoder_r.get())
 
+def handle_ccd_data(arr):
+    """
+    处理CCD数据，找出大于阈值的数据点并计算它们的坐标中间值
+    arr: CCD数据数组
+    返回: 有效数据点的坐标中间值，如果没有有效数据点则返回-1
+    """
+    threshold = 2000
+    valid_indices = []
+    
+    # 找出所有大于阈值的数据点的索引
+    for i, value in enumerate(arr):
+        if value > threshold:
+            valid_indices.append(i)
+    
+    # 如果有有效数据点，计算它们的中间值
+    if valid_indices:
+        middle_index = sum(valid_indices) / len(valid_indices)
+        return middle_index
+    else:
+        # 如果没有有效数据点，返回-1表示未找到赛道
+        return -1
+
+def calculate_line_deviation(middle1, middle2):
+    """
+    根据两个CCD的中间值计算线路偏差
+    middle1: CCD1的中间值 (上方摄像头)
+    middle2: CCD2的中间值 (下方摄像头)
+    返回: 线路偏差值
+    """
+    center = 62  # 赛道中心位置
+    
+    # 如果两个CCD都检测到线路
+    if middle1 != -1 and middle2 != -1:
+        # 使用两个CCD的加权平均，上方CCD权重更大用于预判
+        deviation = (middle1 * 0.7 + middle2 * 0.3) - center
+    elif middle1 != -1:
+        # 只有上方CCD检测到
+        deviation = middle1 - center
+    elif middle2 != -1:
+        # 只有下方CCD检测到
+        deviation = middle2 - center
+    else:
+        # 都没检测到，保持上次偏差
+        deviation = line_deviation
+    
+    return deviation
+
+def ccd_process(timer):
+    """CCD数据处理函数，独立定时器运行"""
+    global ccd_ticker_flag, ccd_ticker_count, line_deviation, line_control_output
+    
+    ccd_ticker_flag = True
+    ccd_ticker_count = (ccd_ticker_count + 1) % 100
+    
+    try:
+        # 读取两个CCD的数据
+        ccd_data1 = ccd.get(0)  # 上方CCD
+        ccd_data2 = ccd.get(1)  # 下方CCD
+        
+        # 处理CCD数据获取中间值
+        middle_value1 = handle_ccd_data(ccd_data1)
+        middle_value2 = handle_ccd_data(ccd_data2)
+        
+        # 计算线路偏差
+        line_deviation = calculate_line_deviation(middle_value1, middle_value2)
+        
+        # 使用PD控制器计算线路控制输出
+        line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
+        
+        # 限制线路控制输出
+        line_control_output = limit(line_control_output, -1000, 1000)
+        
+        # 每20次循环打印一次调试信息
+        if ccd_ticker_count % 20 == 0:
+            print("CCD1:", middle_value1, "CCD2:", middle_value2, "偏差:", line_deviation, "控制输出:", line_control_output)
+            
+    except Exception as e:
+        print("CCD处理错误:", e)
+        line_control_output = 0
+
 # 初始化定时器
 pit1 = ticker(1)
 pit3 = ticker(3)
+pit2 = ticker(2)  # CCD处理定时器
 pit1.capture_list(imu)
 pit3.capture_list(encoder_l, encoder_r)
+pit2.capture_list(ccd)  # CCD定时器捕获CCD
 pit1.callback(control_loop)
 pit3.callback(encoder_update)
+pit2.callback(ccd_process)  # CCD处理回调
 
 # 启动系统
 imu_init()
 pit1.start(1)
 pit3.start(10)
+pit2.start(10)  # CCD以10ms间隔运行，快速响应
 
 # 主循环
 while True:
     if ticker_flag:
         ticker_flag = False
     
+    if ccd_ticker_flag:
+        ccd_ticker_flag = False
+    
     if end_switch.value() != end_state:
         pit1.stop()
         pit3.stop()
+        pit2.stop()  # 停止CCD定时器
         print("系统停止")
         break
     
     gc.collect()
+
 
 
 

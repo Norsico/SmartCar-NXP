@@ -68,7 +68,7 @@ while True:
         
         # 处理CCD数据并获取中间值
         middle_value1 = handle_arr(ccd_data1)
-        # middle_value2 = handle_arr(ccd_data2)
+        middle_value2 = handle_arr(ccd_data2)
 
         # 计算偏差
         deviation = cau_deviation(middle_index=62,actual_index=middle_value1)
@@ -76,10 +76,14 @@ while True:
         # 每隔send_interval次采集发送一次数据
         if ticker_count % send_interval == 0:
             try:
+                # 说明
+                # CCD1是杆子上面的摄像头，CCD2是下面的
+                # 当车子在赛道中间的时候，两个读取的中间值大概是61~62
+                # 当前方是右转弯的时候，CCD1大概是71.5-72.5，CCD2大概是75.5
+                # 当前方是左转弯的时候，CCD1大概是52.5，CCD2大概是49.5
                 # 打印数据
-                # print("CCD1 中间值:", middle_value1)
-                print("偏差:", deviation)
-                # print("CCD2 中间值:", middle_value2)
+                print("CCD1 中间值:", middle_value1, "CCD2 中间值:", middle_value2)
+                #pfrint("偏差:", deviation)
             except Exception as e:
                 print("发送数据失败:", e)
         
@@ -90,4 +94,5 @@ while True:
     
     # 回收内存
     gc.collect()
+
 
