@@ -297,6 +297,38 @@ def handle_ccd_data(arr):
         if value > threshold:
             valid_indices.append(i)
     
+    if not valid_indices:
+        return -1
+    
+    # 如果检测点太少，直接返回中间值
+    if len(valid_indices) < 3:
+        return sum(valid_indices) / len(valid_indices)
+    
+    # 寻找最大的连续区域（主赛道）
+    max_group = []
+    current_group = [valid_indices[0]]
+    
+    for i in range(1, len(valid_indices)):
+        # 如果相邻点距离小于3个像素，认为是连续的
+        if valid_indices[i] - valid_indices[i-1] <= 3:
+            current_group.append(valid_indices[i])
+        else:
+            # 断开了，检查当前组是否更大
+            if len(current_group) > len(max_group):
+                max_group = current_group.copy()
+            current_group = [valid_indices[i]]
+    
+    # 检查最后一组
+    if len(current_group) > len(max_group):
+        max_group = current_group.copy()
+    
+    # 如果找到连续区域，使用该区域的中心
+    if max_group:
+        return sum(max_group) / len(max_group)
+    else:
+        # 没有连续区域，使用最接近中心的点
+        center = 64
+        closest_point = min(valid_indices, key=lambda x: abs(x - center))
     # 如果有有效数据点，计算它们的中间值
     if valid_indices:
         middle_index = sum(valid_indices) / len(valid_indices)
@@ -312,23 +344,38 @@ def calculate_line_deviation(middle1, middle2):
     middle2: CCD2的中间值 (下方摄像头)
     返回: 线路偏差值
     """
+    global line_deviation
     center = 62  # 赛道中心位置
+    current_deviation = 0
     
     # 如果两个CCD都检测到线路
     if middle1 != -1 and middle2 != -1:
-        # 使用两个CCD的加权平均，上方CCD权重更大用于预判
-        deviation = (middle1 * 0.7 + middle2 * 0.3) - center
+        # 检查两个CCD数据是否合理（差距不应该太大）
+        diff = abs(middle1 - middle2)
+        if diff < 15:  # 如果两个CCD读数相近，说明是直线
+            current_deviation = (middle1 * 0.6 + middle2 * 0.4) - center
+        else:
+            # 差距较大时，优先相信上方CCD（预判作用）
+            current_deviation = middle1 - center
     elif middle1 != -1:
         # 只有上方CCD检测到
-        deviation = middle1 - center
+        current_deviation = middle1 - center
     elif middle2 != -1:
         # 只有下方CCD检测到
-        deviation = middle2 - center
+        current_deviation = middle2 - center
     else:
         # 都没检测到，保持上次偏差
-        deviation = line_deviation
+        return line_deviation
     
-    return deviation
+    # 异常值过滤：如果偏差变化过大，可能是干扰
+    if abs(current_deviation - line_deviation) > 20:
+        # 偏差变化太大，使用加权平均平滑过渡
+        current_deviation = line_deviation * 0.7 + current_deviation * 0.3
+    
+    # 限制偏差范围
+    current_deviation = max(-30, min(30, current_deviation))
+    
+    return current_deviation
 
 def ccd_process(timer):
     """CCD数据处理函数，独立定时器运行"""
@@ -342,26 +389,40 @@ def ccd_process(timer):
         ccd_data1 = ccd.get(0)  # 上方CCD
         ccd_data2 = ccd.get(1)  # 下方CCD
         
+        # 检查数据有效性
+        if not ccd_data1 or not ccd_data2:
+            return
+        
         # 处理CCD数据获取中间值
         middle_value1 = handle_ccd_data(ccd_data1)
         middle_value2 = handle_ccd_data(ccd_data2)
         
         # 计算线路偏差
-        line_deviation = calculate_line_deviation(middle_value1, middle_value2)
+        new_deviation = calculate_line_deviation(middle_value1, middle_value2)
         
-        # 使用PD控制器计算线路控制输出
-        line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
-        
-        # 限制线路控制输出
-        line_control_output = limit(line_control_output, -1000, 1000)
+        # 只有当偏差有效时才更新
+        if new_deviation is not None:
+            line_deviation = new_deviation
+            
+            # 使用PD控制器计算线路控制输出
+            line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
+            
+            # 限制线路控制输出
+            line_control_output = limit(line_control_output, -2000, 2000)
         
         # 每20次循环打印一次调试信息
         if ccd_ticker_count % 20 == 0:
-            print("CCD1:", middle_value1, "CCD2:", middle_value2, "偏差:", line_deviation, "控制输出:", line_control_output)
+            status1 = "OK" if middle_value1 != -1 else "MISS"
+            status2 = "OK" if middle_value2 != -1 else "MISS"
+            print("CCD1:{:.1f}[{}] CCD2:{:.1f}[{}] 偏差:{:.1f} 输出:{:.0f}".format(
+                middle_value1 if middle_value1 != -1 else 0, status1,
+                middle_value2 if middle_value2 != -1 else 0, status2,
+                line_deviation, line_control_output))
             
     except Exception as e:
         print("CCD处理错误:", e)
-        line_control_output = 0
+        # 发生错误时逐渐减小控制输出，避免突然停止
+        line_control_output *= 0.8
 
 # 初始化定时器
 pit1 = ticker(1)
