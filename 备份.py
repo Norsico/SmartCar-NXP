@@ -5,8 +5,13 @@ from seekfree import *
 import gc
 import time
 import math
+import ustruct
 
-# 在文件开头添加全局变量初始化
+# 日志记录标志
+LOG_ENABLED = True
+LOG_INTERVAL = 100  # 每隔多少次循环记录一次日志
+log_counter = 0
+
 err_1 = 0
 err_sum_1 = 0
 err_last_1 = 0
@@ -23,18 +28,13 @@ ticker_flag2 = 0
 Filter_data = [0, 0, 0]
 PI = 3.14159265358
 last_yaw = 0
-turn_deviation = 0
-# 添加电机输出变量初始化
-last_motor1 = 0
-last_motor2 = 0
-
 # 开关
 end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
 end_state = end_switch.value()
 
 # 电机初始化
 motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C28_DIR_C29, 13000, duty=0, invert=True)
-motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False)
+motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=True)
 
 # 编码器初始化
 encoder_l = encoder("C0", "C1", True)
@@ -43,14 +43,6 @@ encoder_r = encoder("C2", "C3")
 # 陀螺仪初始化
 imu = IMU660RX()
 imu_data = imu.get()
-
-ccd = TSL1401(10)
-# 调整 CCD 的采样精度为 12bit
-ccd.set_resolution(TSL1401.RES_12BIT)
-ccd_ticker_flag = False
-ccd_ticker_count = 0
-ccd_runtime_count = 0
-ccd_send_interval = 5  # 每5次采集发送一次数据
 
 ticker_count = 0
 ticker_count2 = 0
@@ -61,53 +53,54 @@ uart2.init(115200)
 
 # 串级参数 - 调整PID参数以减小振荡
 # ////////////角速度//////////////////////
-angle_kp = -1180.0  # 原值-1100.0，增加比例系数以提高响应力
-angle_ki = -0.0  # 保持为0，避免积分作用引起的摇摆
-angle_kd = -195.0  # 原值-180.0，适当增加微分作用，提供稳定性
+angle_kp = -1200.0  # 原值-1500.0，进一步减小以降低抖动
+angle_ki = -0.0  # 原值-0.8，降低积分作用进一步减少振荡
+angle_kd = -180.0  # 原值-150.0，增加微分作用抑制振荡
 # ////////////角度//////////////////////
-roll_angle_Kp = 0.064  # 原值0.058，增加比例系数以提高响应力
-roll_angle_Ki = 0.00004  # 原值0.00002，适当增加积分作用
-roll_angle_Kd = 0.16  # 原值0.14，增加微分作用以提供稳定性
+roll_angle_Kp = 0.055  # 原值0.07，减小以降低响应强度
+roll_angle_Ki = 0.0000  # 原值0.0001，减小以降低积分作用
+roll_angle_Kd = 0.12  # 原值0.09，增加以增强稳定性
 # ////////////速度//////////////////////
-speed_Kp = 0.095  # 原值0.085，增加以提高速度控制的影响力
-speed_Ki = 0.000012  # 原值0.000008，适当增加积分作用
-speed_Kd = 0.015  # 原值0.012，增加以提供更好的阻尼效果
+speed_Kp = 0.1  # 原值0.025，进一步减小以减少摆动幅度
+speed_Ki = 0.000015  # 原值0.00002，减小以降低长期累积效应
+speed_Kd = 0.008  # 原值0.005，增加以提供更好的阻尼效果，抑制摆动
 angle_1 = 0
 speed_1 = 0
 motor1 = 0
 motor2 = 0
-med_roll_angle = 25  # 设定角度
-
-# 转向PID参数
-turn_kp = 40.0  # 转向比例系数，控制转向响应的快慢
-turn_ki = 0  # 转向积分系数，消除稳态误差
-turn_kd = 70.0  # 转向微分系数，抑制转向过冲
-turn_err = 0  # 转向误差
-turn_err_sum = 0  # 转向误差累积
-turn_err_last = 0  # 上一次转向误差
-last_valid_deviation = 0  # 上一次有效的偏差值，用于处理丢失赛道情况
-turn_result = 0  # 转向PID输出结果
+med_roll_angle = 26.1
 
 # 前进速度控制参数
-TARGET_SPEED = 10  # 目标速度，正值前进，负值后退，0为静止平衡
+TARGET_SPEED = 20  # 目标速度，正值前进，负值后退，0为静止平衡
                   # 推荐范围：0-20，建议从小值(5-8)开始尝试
                   # 调整此参数控制小车前进后退
-FORWARD_OFFSET = 0.08  # 原值0.06，增加前进偏移补偿，提高前进姿态
+FORWARD_OFFSET = 0.1  # 前进偏移补偿，微调前进姿态
 
 # 电机死区补偿参数
-MOTOR_DEADBAND = 235  # 原值220，增加死区补偿，提高低速力矩
+MOTOR_DEADBAND = 230  # 原值250，减小死区补偿，提高低速响应平滑性
+
+# 平衡静态偏移调整
+# 可调整此参数使机器人完全静止
+STATIC_OFFSET = 0.06  # 原值0.08，减小静态偏移，与新的med_roll_angle匹配
+# 当机器人向前漂移时，增加此值；向后漂移时，减小此值
+
+# 左右电机平衡调整参数（解决转圈问题）
+LEFT_MOTOR_FACTOR = 0.95  # 左电机输出缩放因子，小于1可减少逆时针转动
 
 # 静止模式控制参数
-STATIC_SPEED_THRESHOLD = 7  # 原值8，略微降低静止阈值
-STATIC_CONTROL_FACTOR = 0.58  # 原值0.55，增加静止模式控制强度
+STATIC_SPEED_THRESHOLD = 12  # 原值8，增大静止阈值，更容易进入静止模式
+STATIC_CONTROL_FACTOR = 0.4  # 原值0.5，减小静止模式控制强度，降低摆动
 
 # 速度积分限制参数
-SPEED_INTEGRAL_LIMIT = 400  # 原值350，增加速度积分限幅，提高长期稳定性
+SPEED_INTEGRAL_LIMIT = 500  # 原值800，减小速度积分限幅，防止积分累积导致的摆动
 
 # 速度平滑参数
-SPEED_SMOOTH_FACTOR = 0.87  # 原值0.9，略微降低平滑系数，提高响应速度
+SPEED_SMOOTH_FACTOR = 0.7  # 速度值平滑系数，防止速度突变引起的摆动
 last_speed_value = 0  # 上一次的速度值
 
+# 运动模式（默认为平衡模式）
+MOTION_MODE = 0  # 0=平衡静止，1=缓慢前进，2=加速，3=减速...
+# 可以通过外部按键或串口命令切换模式
 
 #################################################编码器卡尔曼滤波
 KAL_P = 0.02  # 估算协方差
@@ -122,6 +115,14 @@ KAL_Q2 = 0.50  # 过程噪声协方差 (原值0.70)
 KAL_R2 = 250  # 测量噪声协方差 (原值200)
 KAL_Output2 = 0.0  # 卡尔曼滤波器输出
 
+# 日志记录函数
+def log_data(message, data=None):
+    if LOG_ENABLED:
+        if data is not None:
+            uart2.write("{}: {}\n".format(message, data))
+        else:
+            uart2.write("{}\n".format(message))
+
 ######################################################
 def limit(value, min_value, max_value):
     if value < min_value:
@@ -135,10 +136,10 @@ def limit(value, min_value, max_value):
 # 电机死区补偿函数
 def motor_output_with_deadband(duty):
     # 对于接近零的小信号，直接输出零，防止电机抖动
-    if abs(duty) < 25:  # 原值28，降低小信号阈值，提高响应性
+    if abs(duty) < 30:  # 原值50，降低小信号阈值
         return 0
     
-    # 死区补偿 - 使用线性补偿
+    # 死区补偿
     if duty > 0:
         return duty + MOTOR_DEADBAND
     elif duty < 0:
@@ -165,16 +166,8 @@ def pid_position_1(med, value, kp, ki, kd):
     return pwm_1
 
 
-def pid_position_2(med, value, kp=None, ki=None, kd=None):
+def pid_position_2(med, value, kp, ki, kd):
     global err_2, err_sum_2, err_last_2
-    # 如果没有提供自定义参数，使用默认值
-    if kp is None:
-        kp = roll_angle_Kp
-    if ki is None:
-        ki = roll_angle_Ki
-    if kd is None:
-        kd = roll_angle_Kd
-    
     pwm_2, err_sum_2 = calculate_pid(err_2, err_sum_2, err_last_2, med, value, kp, ki, kd)
     err_last_2 = err_2
     return pwm_2
@@ -297,6 +290,7 @@ def Imu660():
 def Imu_Init():
     global Filter_data
     global imu_data
+    log_data("开始陀螺仪初始化")
     Filter_data[0] = 0
     Filter_data[1] = 0
     Filter_data[2] = 0
@@ -310,6 +304,7 @@ def Imu_Init():
     Filter_data[0] = float(Filter_data[0] / 1000)
     Filter_data[1] = float(Filter_data[1] / 1000)
     Filter_data[2] = float(Filter_data[2] / 1000)
+    log_data("陀螺仪初始化完成", [Filter_data[0], Filter_data[1], Filter_data[2]])
 
 # 四元数
 def IMU_AHRSupdate(gx, gy, gz, ax, ay, az):
@@ -427,57 +422,24 @@ def KalmanFilter2(input):
     KAL_P2 = (1 - KAL_G2) * KAL_P2  # 更新 协方差 = （1 - 卡尔曼增益） * 当前 估算协方差
     return KAL_Output2
 
+# 转向
+def control_turn(zhong2):
+    errt = (zhong2 - 64)
+    turn_kp = a * abs(errt) + Kpc
+    turn = pid_turn(64, zhong2, turn_kp, turn_ki, turn_kd) + Imu.gyro_z * turn_kd2
 
-# 转向PID控制函数
-def pid_turn(deviation, kp, ki, kd):
-    global turn_err, turn_err_sum, turn_err_last
-    
-    # 计算误差
-    turn_err = deviation
-    
-    # 累积误差(积分项)
-    turn_err_sum += turn_err
-    
-    # 限制积分饱和
-    turn_err_sum = limit(turn_err_sum, -500, 500)
-    
-    # 计算误差变化率(微分项)
-    turn_err_diff = turn_err - turn_err_last
-    
-    # 计算PID输出
-    turn_output = kp * turn_err + ki * turn_err_sum + kd * turn_err_diff
-    
-    # 记录当前误差为上一次误差
-    turn_err_last = turn_err
-    
-    # 限制输出范围
-    turn_output = limit(turn_output, -1000, 1000)
-    
-    return turn_output
-
-# 转向控制函数
-def control_turn(turn_deviation):
-    turn_result = pid_turn(turn_deviation, turn_kp, turn_ki, turn_kd)
-    return turn_result
+    return turn
 
 # 角速度环
-def angle_speed1(med_gyro, cur_gyro, kp=None, ki=None, kd=None):
-    # 如果没有提供自定义参数，使用默认值
-    if kp is None:
-        kp = angle_kp
-    if ki is None:
-        ki = angle_ki
-    if kd is None:
-        kd = angle_kd
-        
-    motor = pid_position_1(med_gyro, cur_gyro, kp, ki, kd)
+def angle_speed1(med_gyro, cur_gyro):
+    motor = pid_position_1(med_gyro, cur_gyro, angle_kp, angle_ki, angle_kd)
     motor = limit(motor, -4000, 4000)
     return (motor)
 
 # 角度环
 def angle(med_roll_angle, cur_roll_angle):
     global angle_1
-    angle_1 = pid_position_2(med_roll_angle, cur_roll_angle)
+    angle_1 = pid_position_2(med_roll_angle, cur_roll_angle, roll_angle_Kp, roll_angle_Ki, roll_angle_Kd)
     return (angle_1)
 
 # 速度环
@@ -487,30 +449,31 @@ def speed(med_speed, cur_speed):
     return speed_1
 
 # 回调函数1
-def time_pit1_handler(time):
-    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2
-    global turn_deviation, last_valid_deviation, turn_result, last_speed_value, err_sum_3
-    global last_motor1, last_motor2  # 添加电机输出相关的全局变量
+def time_pit_handler(time):
+    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, log_counter  # 需要注意的是这里得使用 global 修饰全局属性
     ticker_flag = True
     ticker_count = (ticker_count + 1) if (ticker_count < 10) else (1)  # 计数标注
 
     if ticker_count % 1 == 0:  # 角速度 1ms 执行一次
         Imu660()  # 陀螺仪解算
         
-        # 在静止状态下增强角速度控制
-        if TARGET_SPEED == 0 and abs(last_speed_value) < STATIC_SPEED_THRESHOLD/2:
-            # 静止状态下使用更强的角速度控制参数
-            static_angle_kp = angle_kp * 1.06  # 原值1.03，增加比例系数
-            static_angle_kd = angle_kd * 1.08   # 原值1.05，增加微分系数
-            motor1 = angle_speed1(angle_1, -Imu.gyro_x, static_angle_kp, angle_ki, static_angle_kd)
-            motor2 = angle_speed1(angle_1, -Imu.gyro_x, static_angle_kp, angle_ki, static_angle_kd)
-        else:
-            motor1 = angle_speed1(angle_1, -Imu.gyro_x)
-            motor2 = angle_speed1(angle_1, -Imu.gyro_x)
+        # 记录日志
+        log_counter += 1
+        if log_counter >= LOG_INTERVAL and LOG_ENABLED:
+            log_counter = 0
+            log_data("IMU", [Imu.Pitch, Imu.gyro_x, Imu.Roll, Imu.gyro_y])
+
+        motor1 = angle_speed1(angle_1, -Imu.gyro_x)
+        motor2 = angle_speed1(angle_1, -Imu.gyro_x)
 
         # 加入死区补偿和平滑处理
-        smooth_factor = 0.9  # 原值0.92，略微降低平滑系数，提高响应速度
-        
+        smooth_factor = 0.8  # 原值0.7，增加平滑系数，防止电机输出突变
+        # 保存上一次电机输出
+        global last_motor1, last_motor2
+        if 'last_motor1' not in globals():
+            last_motor1 = 0
+            last_motor2 = 0
+            
         # 平滑处理
         motor1_smooth = smooth_factor * motor1 + (1-smooth_factor) * last_motor1
         motor2_smooth = smooth_factor * motor2 + (1-smooth_factor) * last_motor2
@@ -518,71 +481,27 @@ def time_pit1_handler(time):
         # 电机死区补偿
         motor1_output = motor_output_with_deadband(motor1_smooth)
         motor2_output = motor_output_with_deadband(motor2_smooth)
-
-        # 转向控制
-        # 全局变量已在函数开头声明
-        ccd_data = ccd.get(0)
-        middle_value = handle_arr(ccd_data, threshold=3000, min_points=3)
         
-        # 转向偏差，正的需要往左走，负的需要往右走
-        if middle_value != -1:
-            # 计算偏差：中线位置 - 实际位置
-            turn_deviation = cau_deviation(middle_index=62, actual_index=middle_value)
-            # 记录有效偏差，用于丢失赛道时参考
-            last_valid_deviation = turn_deviation
-            # 应用PID控制计算转向输出
-            turn_result = control_turn(turn_deviation)
-            
-            # 每10次循环打印一次调试信息
-            #if ticker_count % 10 == 0:
-                #print("转向偏差:", turn_deviation, "转向输出:", turn_result)
-        else:
-            turn_result = 0
-            # 丢失赛道时的应急处理
-            #turn_result = handle_lost_track(last_valid_deviation)
-            #if ticker_count % 10 == 0:
-                #print("丢失赛道! 应急转向:", turn_result)
+        # 左右电机平衡调整（解决转圈问题）
+        motor1_output = motor1_output * LEFT_MOTOR_FACTOR
         
-        # 将转向控制应用到左右电机
-        # 左电机减去转向值，右电机加上转向值，实现差速转向
-        #motor1_output -= turn_result  # 左电机
-        #motor2_output += turn_result  # 右电机
-
-        # 更新上一次电机输出，用于下次平滑处理
+        # 更新上一次电机输出
         last_motor1 = motor1_smooth
         last_motor2 = motor2_smooth
 
-        # 限制电机最终输出范围，防止超过电机驱动能力
-        motor1_output = limit(motor1_output, -4230, 4230)
-        motor2_output = limit(motor2_output, -4230, 4230)
-        
-
-        # 将计算结果输出到电机
+        # 输出到电机
         motor_l.duty(motor1_output)
-        motor_r.duty(motor2_output)
-
-        # print("motor1_output", motor1_output, "motor2_output", motor2_output)
+        motor_r.duty(-motor2_output-250)
         
     if ticker_count % 5 == 0:  # 角度 5ms 执行一次
         # 更精细的角度调整，加入前进补偿
         forward_angle_offset = 0
         if TARGET_SPEED > 0:  # 前进时需要前倾一定角度
-            forward_angle_offset = -FORWARD_OFFSET * abs(TARGET_SPEED) / 8
+            forward_angle_offset = -FORWARD_OFFSET * abs(TARGET_SPEED) / 10
         elif TARGET_SPEED < 0:  # 后退时需要后倾
-            forward_angle_offset = FORWARD_OFFSET * abs(TARGET_SPEED) / 8
-        
-        # 静止状态下的角度控制增强
-        if TARGET_SPEED == 0 and abs(last_speed_value) < STATIC_SPEED_THRESHOLD:
-            # 在静止状态下，增强角度控制的响应性
-            static_roll_angle_Kp = roll_angle_Kp * 1.2  # 原值1.05，增加比例系数
-            static_roll_angle_Kd = roll_angle_Kd * 1.2  # 原值1.10，增加微分系数
+            forward_angle_offset = FORWARD_OFFSET * abs(TARGET_SPEED) / 10
             
-            # 使用增强的PID参数计算角度环输出
-            angle_1 = pid_position_2(med_roll_angle - speed_1, -Imu.Pitch, 
-                                    static_roll_angle_Kp, roll_angle_Ki, static_roll_angle_Kd)
-        else:
-            # 正常行驶状态下的角度控制
-            angle_1 = angle(med_roll_angle - speed_1 + forward_angle_offset, -Imu.Pitch)
+        angle_1 = angle(med_roll_angle - speed_1 + STATIC_OFFSET + forward_angle_offset, -Imu.Pitch)
 
     if ticker_count % 10 == 0:  # 速度 10ms 执行一次
         encl_data = encoder_l.get()
@@ -592,50 +511,55 @@ def time_pit1_handler(time):
         raw_avg_speed = (Encoders.KAL_templ_pluse + Encoders.KAL_tempr_pluse) / 2
         
         # 对速度值进行平滑处理，减少突变
+        global last_speed_value
         avg_speed = SPEED_SMOOTH_FACTOR * raw_avg_speed + (1-SPEED_SMOOTH_FACTOR) * last_speed_value
         last_speed_value = avg_speed
         
+        # 检测左右轮速度差异，记录日志
+        speed_diff = Encoders.KAL_templ_pluse - Encoders.KAL_tempr_pluse
+        if log_counter == 0 and LOG_ENABLED:
+            log_data("SPEED_DIFF", speed_diff)
+        
         # 速度控制逻辑
-        if TARGET_SPEED == 0:
+        if TARGET_SPEED == 0:  # 平衡静止模式
             # 改进的静止逻辑：设置更大的静止阈值
             if abs(avg_speed) < STATIC_SPEED_THRESHOLD:  # 使用可配置阈值
                 # 在静止模式中，增强角度控制，降低速度控制影响
                 speed_target = 0
-                speed_value = avg_speed * 0.4  # 原值0.35，增加实际速度敏感度
+                speed_value = avg_speed * 0.4  # 原值0.5，进一步降低实际速度敏感度
                 
                 # 静止模式下减弱速度控制的影响
                 speed_1 = speed(speed_target, speed_value) * STATIC_CONTROL_FACTOR
                 
                 # 清除积分项，防止积分在静止时累积
-                if abs(avg_speed) < 2.5:  # 原值2.0，增加清除积分的条件
-                    err_sum_3 = err_sum_3 * 0.8  # 原值0.75，略微加快积分衰减速度
+                if abs(avg_speed) < 3:  # 原值2，略微提高清除积分的条件
+                    global err_sum_3
+                    err_sum_3 = err_sum_3 * 0.8  # 不立即清零，而是逐渐衰减，避免突变
             else:
                 # 正常行驶模式，但对速度的反应更加平滑
                 speed_result = speed(0, avg_speed)
                 # 对速度控制进行平滑过渡
-                speed_1 = speed_1 * 0.85 + speed_result * 0.15  # 原值0.9和0.1，降低平滑性，提高响应速度
+                speed_1 = speed_1 * 0.7 + speed_result * 0.3  # 缓慢过渡到新的速度控制值
         else:  # 前进/后退模式
-
-            # 前进/后退模式使用不同的控制参数（更积极）
-            forward_kp = 0.025  # 原值0.022，增加比例系数，改善跟踪性能
-            forward_ki = 0.000025  # 原值0.00002，增加积分作用
-            forward_kd = 0.008  # 原值0.006，增加微分作用
+            # 计算速度误差
+            speed_error = TARGET_SPEED - avg_speed
+            
+            # 前进/后退模式使用不同的控制参数（可以更积极）
+            forward_kp = 0.022  # 比正常平衡模式略高，改善跟踪性能
+            forward_ki = 0.00002  # 保持较低积分作用
+            forward_kd = 0.006  # 适中的微分作用
             
             # 速度控制计算
             speed_result = pid_position_3(TARGET_SPEED, avg_speed, forward_kp, forward_ki, forward_kd)
             
             # 平滑过渡
-            transition_factor = 0.55  # 原值0.5，增加响应速率
+            transition_factor = 0.5  # 更快的响应速率，但仍有平滑效果
             speed_1 = speed_1 * (1-transition_factor) + speed_result * transition_factor
+            
+        if log_counter == 0 and LOG_ENABLED:
+            log_data("SPEED", [speed_1, avg_speed, TARGET_SPEED])
 
-# CCD 回调函数
-def time_pit2_handler(time):
-    global ccd_ticker_flag  # 需要注意的是这里得使用 global 修饰全局属性
-    global ccd_ticker_count
-    ccd_ticker_flag = True  # 否则它会新建一个局部变量
-    ccd_ticker_count = (ccd_ticker_count + 1) if (ccd_ticker_count < 100) else (1)
-
-# 回调函数3
+# 回调函数2
 def time_pit3_handler(time):
     global ticker_flag2, ticker_count2  # 需要注意的是这里得使用 global 修饰全局属性
     ticker_flag2 = True  # 否则它会新建一个局部变量
@@ -643,55 +567,40 @@ def time_pit3_handler(time):
     Encoders.KAL_templ_pluse = KalmanFilter(encoder_l.get())
     Encoders.KAL_tempr_pluse = KalmanFilter2(encoder_r.get())
 
-def handle_arr(arr, threshold=2000, min_points=3):
-    valid_indices = []
-    # 找出所有大于阈值的数据点的索引
-    for i, value in enumerate(arr):
-        if value > threshold:
-            valid_indices.append(i)
-    # 如果有足够的有效数据点，计算它们的中间值
-    if len(valid_indices) >= min_points:
-        middle_index = sum(valid_indices) / len(valid_indices)
-        return middle_index
-    else:
-        # 如果没有足够的有效数据点，返回-1表示未找到赛道
-        return -1
-    
-# 计算距离中间的偏差
-def cau_deviation(middle_index=62, actual_index=0):
-    return middle_index - actual_index
 
-# 处理丢失赛道的情况
-def handle_lost_track(last_deviation):
-    # 如果最后一次偏差为正，说明赛道在右侧，应该向右转
-    if last_deviation > 0:
-        return 500  # 向右转大一点
-    # 如果最后一次偏差为负，说明赛道在左侧，应该向左转
-    elif last_deviation < 0:
-        return -500  # 向左转大一点
-    else:
-        return 0  # 如果没有历史偏差信息，保持直行
 
 pit1 = ticker(1)
-plt2 = ticker(2)
 pit3 = ticker(3)
 pit1.capture_list(imu)
 pit3.capture_list(encoder_l, encoder_r)
-
-# 平衡回调
-pit1.callback(time_pit1_handler)
+# 关联 Python 回调函数
+pit1.callback(time_pit_handler)
 pit3.callback(time_pit3_handler)
-# CCD 回调函数
-plt2.capture_list(ccd)
-plt2.callback(time_pit2_handler)
-
 
 # 启动 ticker 实例 参数是触发周期 单位是毫秒
 Imu_Init()
 pit1.start(1)
-plt2.start(10)
 pit3.start(10)
 
+log_data("系统初始化完成")
+
+# 串口命令处理函数
+def uart_handler():
+    global TARGET_SPEED
+    if uart2.any():
+        cmd = uart2.readline().decode().strip()
+        if cmd.startswith('SPD:'):
+            try:
+                # 设置目标速度，格式: SPD:10 (前进速度10)
+                new_speed = float(cmd.split(':')[1])
+                TARGET_SPEED = new_speed
+                log_data("新目标速度设置为", TARGET_SPEED)
+            except:
+                log_data("无效的速度命令")
+        elif cmd == 'STOP':
+            # 紧急停止命令
+            TARGET_SPEED = 0
+            log_data("紧急停止")
 
 # 主循环
 while True:
@@ -699,16 +608,18 @@ while True:
     if ticker_flag:    
         ticker_flag = False
         
+    # 处理可能的串口命令
+    uart_handler()
+    
     # 如果拨码开关打开 对应引脚拉低 就退出循环
     if end_switch.value() != end_state:
         pit1.stop()
         # 删除错误的pit2引用
         pit3.stop()
+        log_data("Ticker stop.")
+        print("Ticker stop.")
         break
 
     gc.collect()
-
-
-
 
 

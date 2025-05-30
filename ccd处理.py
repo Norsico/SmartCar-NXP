@@ -1,21 +1,13 @@
 from machine import *
 from smartcar import ticker
 from seekfree import TSL1401
-from seekfree import WIFI_SPI
 import gc
 import time
 import json
 
-# 调用 TSL1401 模块获取 CCD 实例
-# 参数是采集周期 调用多少次 capture/read 更新一次数据
-# 默认参数为 1 调整这个参数相当于调整曝光时间倍数
-# 这里填了 10 代表 10 次 capture/read 调用才会更新一次数据
 ccd = TSL1401(10)
 # 调整 CCD 的采样精度为 12bit
 ccd.set_resolution(TSL1401.RES_12BIT)
-
-# wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.4.9", "8086")
-# print("wifi success")
 
 time.sleep_ms(500)
 ticker_flag = False
@@ -63,6 +55,10 @@ def handle_arr(arr):
     else:
         # 如果没有有效数据点，返回-1表示未找到赛道
         return -1
+    
+# 计算距离中间的偏差
+def cau_deviation(middle_index=62,actual_index=0):
+    return middle_index - actual_index
 
 # 主循环
 while True:
@@ -73,29 +69,18 @@ while True:
         
         # 处理CCD数据并获取中间值
         middle_value1 = handle_arr(ccd_data1)
-        middle_value2 = handle_arr(ccd_data2)
-        
-        # 打印数据
-        print("CCD1 数据:", ccd_data1)
-        print("CCD1 中间值:", middle_value1)
-        print("CCD2 中间值:", middle_value2)
+        # middle_value2 = handle_arr(ccd_data2)
+
+        # 计算偏差
+        deviation = cau_deviation(middle_index=62,actual_index=middle_value1)
         
         # 每隔send_interval次采集发送一次数据
         if ticker_count % send_interval == 0:
             try:
-                # 创建数据包
-                data_str1 = "CCD1:" + array_to_string(ccd_data1) + "\r\n"
-                # 发送数据
-                # wifi.send_str(data_str1)
-                
-                data_str2 = "CCD2:" + array_to_string(ccd_data2) + "\r\n"
-                # 发送数据
-                # wifi.send_str(data_str2)
-                
-                # 发送中间值数据
-                middle_data = f"MIDDLE:CCD1={middle_value1:.2f},CCD2={middle_value2:.2f}\r\n"
-                # wifi.send_str(middle_data)
-                
+                # 打印数据
+                # print("CCD1 中间值:", middle_value1)
+                print("偏差:", deviation)
+                # print("CCD2 中间值:", middle_value2)
             except Exception as e:
                 print("发送数据失败:", e)
         
@@ -106,3 +91,4 @@ while True:
     
     # 回收内存
     gc.collect()
+
