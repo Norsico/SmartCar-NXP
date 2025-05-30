@@ -25,15 +25,15 @@ encoder_r = encoder("C2", "C3")
 imu = IMU660RX()
 imu_data = imu.get()
 
-# PID参数
-angle_kp, angle_ki, angle_kd = -1180.0, 0.0, -195.0
-roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.04, 0.00004, 0.16
-speed_Kp, speed_Ki, speed_Kd = 0.095, 0.000012, 0.015
+# PID参数 - 进一步增强响应强度
+angle_kp, angle_ki, angle_kd = -2600.0, 0, -420.0  # 进一步增强角速度环响应
+roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
+speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 25
-TARGET_SPEED = 10
+med_roll_angle = 20.5  # 调整平衡角度
+TARGET_SPEED = 20  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # 卡尔曼滤波参数
@@ -90,7 +90,7 @@ quaternion = Quaternion()
 # 积分误差
 I_ex = I_ey = I_ez = 0.0
 delta_T = 0.001
-param_Kp, param_Ki = 15.5, 0.006
+param_Kp, param_Ki = 18.0, 0.008  # 适当降低姿态解算增益
 
 def limit(value, min_val, max_val):
     return max(min_val, min(value, max_val))
@@ -114,8 +114,8 @@ def imu_process():
     imu_data_obj.gyro_y = (imu_data[4] - Filter_data[1]) * PI / 180 / 16.4
     imu_data_obj.gyro_z = (imu_data[5] - Filter_data[2]) * PI / 180 / 14.4
     
-    # 加速度滤波
-    alpha = 0.3
+    # 加速度滤波 - 增加平滑性减少摆动
+    alpha = 0.35  # 进一步降低滤波系数，增加平滑性
     imu_data_obj.acc_x = (imu_data[0] * alpha / 4096) + (imu_data_obj.acc_x * (1 - alpha))
     imu_data_obj.acc_y = (imu_data[1] * alpha / 4096) + (imu_data_obj.acc_y * (1 - alpha))
     imu_data_obj.acc_z = (imu_data[2] * alpha / 4096) + (imu_data_obj.acc_z * (1 - alpha))
@@ -182,7 +182,7 @@ def ahrs_update(gx, gy, gz, ax, ay, az):
     # 计算欧拉角
     value1 = limit_angle(-2 * quaternion.q1 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q2)
     imu_data_obj.Roll = math.asin(value1) * 180 / PI
-    imu_data_obj.Pitch = math.atan2(2 * quaternion.q2 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q1,
+    imu_data_obj.Pitch = -math.atan2(2 * quaternion.q2 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q1,
                                    -2 * quaternion.q1**2 - 2 * quaternion.q2**2 + 1) * 180 / PI
     imu_data_obj.Yaw = math.atan2(2 * quaternion.q1 * quaternion.q2 + 2 * quaternion.q0 * quaternion.q3,
                                  -2 * quaternion.q2**2 - 2 * quaternion.q3**2 + 1) * 180 / PI
@@ -228,20 +228,21 @@ def control_loop(timer):
     
     motor1 = pid_angle_speed.update(angle_1, -imu_data_obj.gyro_x)
     motor2 = motor1
-    motor1 = limit(motor1, -4000, 4000)
-    motor2 = limit(motor2, -4000, 4000)
+    motor1 = limit(motor1, -7200, 7200)  # 增加电机输出限制，提高响应强度
+    motor2 = limit(motor2, -7200, 7200)  # 增加电机输出限制，提高响应强度
     
     motor_l.duty(motor1)
     motor_r.duty(-motor2)
     
     # 5ms: 角度控制
     if ticker_count % 5 == 0:
-        angle_1 = pid_angle.update(med_roll_angle - speed_1, -imu_data_obj.Pitch)
+        angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
     
     # 10ms: 速度控制
     if ticker_count == 0:
         avg_speed = (kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
+        speed_1 = limit(speed_1, -5, 5)  # 限制角度偏移在±5度内
 
 def encoder_update(timer):
     kalman_l.update(encoder_l.get())
@@ -272,3 +273,6 @@ while True:
         break
     
     gc.collect()
+
+
+
