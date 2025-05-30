@@ -68,10 +68,10 @@ angle_1 = 0
 speed_1 = 0
 motor1 = 0
 motor2 = 0
-med_roll_angle = 26.1
+med_roll_angle = 25.1
 
 # 前进速度控制参数
-TARGET_SPEED = 20  # 目标速度，正值前进，负值后退，0为静止平衡
+TARGET_SPEED = 0  # 目标速度，正值前进，负值后退，0为静止平衡
                   # 推荐范围：0-20，建议从小值(5-8)开始尝试
                   # 调整此参数控制小车前进后退
 FORWARD_OFFSET = 0.1  # 前进偏移补偿，微调前进姿态
@@ -290,7 +290,6 @@ def Imu660():
 def Imu_Init():
     global Filter_data
     global imu_data
-    log_data("开始陀螺仪初始化")
     Filter_data[0] = 0
     Filter_data[1] = 0
     Filter_data[2] = 0
@@ -304,7 +303,6 @@ def Imu_Init():
     Filter_data[0] = float(Filter_data[0] / 1000)
     Filter_data[1] = float(Filter_data[1] / 1000)
     Filter_data[2] = float(Filter_data[2] / 1000)
-    log_data("陀螺仪初始化完成", [Filter_data[0], Filter_data[1], Filter_data[2]])
 
 # 四元数
 def IMU_AHRSupdate(gx, gy, gz, ax, ay, az):
@@ -461,8 +459,6 @@ def time_pit_handler(time):
         log_counter += 1
         if log_counter >= LOG_INTERVAL and LOG_ENABLED:
             log_counter = 0
-            log_data("IMU", [Imu.Pitch, Imu.gyro_x, Imu.Roll, Imu.gyro_y])
-
         motor1 = angle_speed1(angle_1, -Imu.gyro_x)
         motor2 = angle_speed1(angle_1, -Imu.gyro_x)
 
@@ -517,9 +513,7 @@ def time_pit_handler(time):
         
         # 检测左右轮速度差异，记录日志
         speed_diff = Encoders.KAL_templ_pluse - Encoders.KAL_tempr_pluse
-        if log_counter == 0 and LOG_ENABLED:
-            log_data("SPEED_DIFF", speed_diff)
-        
+    
         # 速度控制逻辑
         if TARGET_SPEED == 0:  # 平衡静止模式
             # 改进的静止逻辑：设置更大的静止阈值
