@@ -18,6 +18,20 @@ ccd_ticker_count = 0
 line_deviation = 0  # 线路偏差
 line_control_output = 0  # 线路控制输出
 
+# LCD显示相关变量
+display_lines = {}  # 存储每一行的内容 {行号: (文本, 颜色)}
+
+# 颜色定义
+class Colors:
+    WHITE = 0xFFFF
+    BLACK = 0x0000
+    RED = 0xF800
+    GREEN = 0x07E0
+    BLUE = 0x001F
+    YELLOW = 0xFFE0
+    CYAN = 0x07FF  # 青色
+    MAGENTA = 0xF81F # 品红色
+
 # 硬件初始化
 end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
 end_state = end_switch.value()
@@ -36,19 +50,104 @@ ccd = TSL1401(10)
 ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
+# LCD初始化
+# 定义片选引脚
+cs = Pin('B29' , Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+# 拉高拉低一次 CS 片选确保屏幕通信时序正常
+cs.high()
+cs.low()
+# 定义控制引脚
+rst = Pin('B31', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+dc  = Pin('B5' , Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+blk = Pin('C21', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+# 新建 LCD 驱动实例 这里的索引范围与 SPI 示例一致 当前仅支持 IPS200
+drv = LCD_Drv(SPI_INDEX=2, BAUDRATE=60000000, DC_PIN=dc, RST_PIN=rst, LCD_TYPE=LCD_Drv.LCD200_TYPE)
+# 新建 LCD 实例
+lcd = LCD(drv)
+# color 接口设置屏幕显示颜色 [前景色,背景色]
+lcd.color(0xFFFF, 0x0000)
+# mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
+lcd.mode(2)
+# 清屏 不传入参数就使用当前的 背景色 清屏
+lcd.clear(0x0000)
+
+def lcd_print(text, line=None, color=Colors.WHITE):
+    """
+    LCD显示函数，可指定显示行
+    text: 要显示的文本
+    line: 指定显示在第几行(0-12)，如果为None则自动追加
+    color: 显示颜色，使用Colors类中的颜色
+    """
+    global display_lines
+    
+    if line is not None:
+        # 指定行显示
+        if 0 <= line <= 9:  # 限制行数范围（0-9行）
+            display_lines[line] = (text, color)
+            # 只更新这一行
+            update_single_line(line, text, color)
+    else:
+        # 自动追加模式（向上滚动）
+        # 将所有行向上移动
+        new_lines = {}
+        for i in range(1, 10):  # 1-9行向上移动到0-8行
+            if i in display_lines:
+                new_lines[i-1] = display_lines[i]
+        
+        # 在最后一行添加新文本
+        new_lines[8] = (text, color)
+        display_lines = new_lines
+        
+        # 完全刷新显示
+        refresh_display()
+
+def update_single_line(line_num, text, color):
+    """更新单行显示"""
+    y_pos = 20 + line_num * 18  # 增加行间距以适应更大字体
+    if y_pos < 185:
+        # 先清除这一行（用黑色矩形覆盖）
+        # 使用一条粗线来清除整行
+        lcd.line(0, y_pos, 200, y_pos, color=Colors.BLACK, thick=17)
+        
+        # 截断过长的文本
+        if len(text) > 24:  # 更大字体每行显示更少字符
+            text = text[:21] + "..."
+        
+        # 显示新文本，使用更大字体
+        lcd.str16(0, y_pos, text, color)
+
+def refresh_display():
+    """刷新整个显示屏"""
+    global display_lines
+    
+    # 清屏并重新显示所有内容
+    lcd.clear(Colors.BLACK)
+    lcd.str16(0, 0, "Smart Car Status", Colors.GREEN)
+    
+    # 显示所有行的内容
+    for line_num in range(10):  # 0-9行（减少行数以适应更大字体）
+        if line_num in display_lines:
+            text, color = display_lines[line_num]
+            y_pos = 20 + line_num * 18  # 增加行间距
+            if y_pos < 185:
+                # 截断过长的文本
+                if len(text) > 24:  # 更大字体每行显示更少字符
+                    text = text[:21] + "..."
+                lcd.str16(0, y_pos, text, color)
+
 # PID参数 - 进一步增强响应强度
 angle_kp, angle_ki, angle_kd = -2600.0, 0, -420.0  # 进一步增强角速度环响应
 roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
 speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
 
 # 线路跟踪PD控制器参数
-line_kp = 15  # 比例控制，快速响应
+line_kp = 15 # 比例控制，快速响应
 line_kd = 5  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 20.5  # 调整平衡角度
-TARGET_SPEED = 20  # 设置小的前进速度进行测试
+TARGET_SPEED = 15  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # 卡尔曼滤波参数
@@ -120,7 +219,7 @@ quaternion = Quaternion()
 # 积分误差
 I_ex = I_ey = I_ez = 0.0
 delta_T = 0.001
-param_Kp, param_Ki = 18.0, 0.008  # 适当降低姿态解算增益
+param_Kp, param_Ki = 18.0, 0  # 适当降低姿态解算增益
 
 def limit(value, min_val, max_val):
     return max(min_val, min(value, max_val))
@@ -272,16 +371,25 @@ def control_loop(timer):
     # 5ms: 角度控制
     if ticker_count % 5 == 0:
         angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
+        # 每2个5ms周期（即10ms）显示一次角度信息
+        if ((ticker_count // 5) % 2) == 0:
+            lcd_print(f"Pitch: {imu_data_obj.Pitch:.1f} Angle: {angle_1:.1f}", line=5, color=Colors.CYAN)
+    
+    # 1ms: 显示实时电机输出
+    if ticker_count % 2 == 0:  # 每2ms显示一次
+        lcd_print(f"Motor L:{motor1:.0f} R:{motor2:.0f}", line=6, color=Colors.MAGENTA)
     
     # 10ms: 速度控制
     if ticker_count == 0:
         avg_speed = (kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
+        lcd_print(f"Speed: {avg_speed:.1f}, speed_1: {speed_1:.2f}", line=0, color=Colors.GREEN)
         speed_1 = limit(speed_1, -5, 5)  # 限制角度偏移在±5度内
 
 def encoder_update(timer):
     kalman_l.update(encoder_l.get())
     kalman_r.update(encoder_r.get())
+    print(f"Encoder L:{encoder_l.get()} R:{encoder_r.get()}")
 
 def handle_ccd_data(arr):
     """
@@ -410,38 +518,42 @@ def ccd_process(timer):
             # 限制线路控制输出
             line_control_output = limit(line_control_output, -2000, 2000)
         
-        # 每20次循环打印一次调试信息
-        if ccd_ticker_count % 20 == 0:
+        # 每2次循环打印一次调试信息
+        if ccd_ticker_count % 2 == 0:
             status1 = "OK" if middle_value1 != -1 else "MISS"
             status2 = "OK" if middle_value2 != -1 else "MISS"
-            print("CCD1:{:.1f}[{}] CCD2:{:.1f}[{}] 偏差:{:.1f} 输出:{:.0f}".format(
+            lcd_print("CCD1:{:.1f}[{}] CCD2:{:.1f}[{}]".format(
                 middle_value1 if middle_value1 != -1 else 0, status1,
-                middle_value2 if middle_value2 != -1 else 0, status2,
-                line_deviation, line_control_output))
+                middle_value2 if middle_value2 != -1 else 0, status2), line=3, color=Colors.YELLOW)
+            lcd_print("Dev:{:.1f} Out:{:.0f}".format(line_deviation, line_control_output), line=4, color=Colors.CYAN)
             
     except Exception as e:
-        print("CCD处理错误:", e)
+        lcd_print(f"CCD Error: {e}", line=3, color=Colors.RED)
         # 发生错误时逐渐减小控制输出，避免突然停止
         line_control_output *= 0.8
 
 # 初始化定时器
 pit1 = ticker(1)
-pit3 = ticker(3)
 pit2 = ticker(2)  # CCD处理定时器
+pit3 = ticker(3)
+
 pit1.capture_list(imu)
-pit3.capture_list(encoder_l, encoder_r)
 pit2.capture_list(ccd)  # CCD定时器捕获CCD
+pit3.capture_list(encoder_l, encoder_r)
+
 pit1.callback(control_loop)
-pit3.callback(encoder_update)
 pit2.callback(ccd_process)  # CCD处理回调
+pit3.callback(encoder_update)
+
 
 # 启动系统
 imu_init()
 pit1.start(1)
-pit3.start(10)
 pit2.start(10)  # CCD以10ms间隔运行，快速响应
+pit3.start(1)
 
 # 主循环
+loop_count = 0
 while True:
     if ticker_flag:
         ticker_flag = False
@@ -449,15 +561,19 @@ while True:
     if ccd_ticker_flag:
         ccd_ticker_flag = False
     
+    # 每2次循环显示一次系统状态信息
+    loop_count += 1
+    if loop_count % 2 == 0:
+        lcd_print(f"Yaw: {imu_data_obj.Yaw:.1f} Total: {imu_data_obj.Total_Yaw:.1f}", line=7, color=Colors.YELLOW)
+        lcd_print(f"AngSpeed: {imu_data_obj.gyro_x:.2f}", line=8, color=Colors.WHITE)
+    
     if end_switch.value() != end_state:
         pit1.stop()
         pit3.stop()
         pit2.stop()  # 停止CCD定时器
-        print("系统停止")
+        lcd_print("System Stopped", line=5, color=Colors.RED)
         break
     
     gc.collect()
-
-
 
 
