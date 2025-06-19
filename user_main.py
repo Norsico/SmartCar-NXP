@@ -37,18 +37,17 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # PID参数 - 进一步增强响应强度
-angle_kp, angle_ki, angle_kd = -2400.0, 0, -450.0  # 角速度环
-roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 角度环
-speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015  # 速度环
-
+angle_kp, angle_ki, angle_kd = -2600.0, 0, -420.0  # 进一步增强角速度环响应
+roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
+speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
 # 线路跟踪PD控制器参数
 line_kp = 50  # 比例控制，快速响应
 line_kd = 40  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 27  # 调整平衡角度
-TARGET_SPEED = 5  # 设置小的前进速度进行测试
+med_roll_angle = 32  # 调整平衡角度
+TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # 卡尔曼滤波参数
@@ -259,9 +258,9 @@ def control_loop(timer):
     motor1 = pid_angle_speed.update(angle_1, -imu_data_obj.gyro_x)
     motor2 = motor1
     
-    # 添加线路控制输出到电机控制
-    motor1 -= line_control_output  # 左电机增加转向控制
-    motor2 += line_control_output  # 右电机减少转向控制
+    # CCD巡线控制
+    #motor1 -= line_control_output  # 左电机增加转向控制
+    #motor2 += line_control_output  # 右电机减少转向控制
     
     motor1 = limit(motor1, -7000, 7000)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -7000, 7000)  # 增加电机输出限制，提高响应强度
@@ -447,4 +446,5 @@ while True:
         break
     
     gc.collect()
+
 
