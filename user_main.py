@@ -6,6 +6,16 @@ import gc
 import time
 import math
 
+# WiFi调参初始化
+try:
+    wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.31.9", "8086")
+    wifi.send_str("WiFi parameter tuning ready.\r\n")
+    time.sleep_ms(500)
+    wifi_enabled = True
+    print("WiFi调参模块初始化成功")
+except:
+    wifi_enabled = False
+
 # 全局变量
 PI = 3.14
 ticker_flag = False
@@ -37,18 +47,73 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # PID参数 - 进一步增强响应强度
-angle_kp, angle_ki, angle_kd = -2400.0, 0, -400.0  # 进一步增强角速度环响应
-roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
-speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
+angle_kp = -1860
+angle_ki = 0
+angle_kd = 50 
+roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.1749, 0, 0.1  # 进一步增强角度环响应
+
+speed_Kp, speed_Ki, speed_Kd = 0.099, 0, 4.0645
+
 # 线路跟踪PD控制器参数
 line_kp = 50  # 比例控制，快速响应
 line_kd = 40  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 32  # 调整平衡角度
+med_roll_angle = 34  # 调整平衡角度
 TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
+
+# WiFi调参数据存储
+wifi_data = [angle_kp, speed_Kp, angle_kd, roll_angle_Kp, TARGET_SPEED, roll_angle_Kd, med_roll_angle, speed_Kd]
+
+def update_wifi_parameters():
+    """更新WiFi调参数据"""
+    global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, TARGET_SPEED
+    global med_roll_angle, pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
+    
+    if not wifi_enabled:
+        return
+    
+    try:
+        # 数据解析
+        data_flag = wifi.data_analysis()
+        
+        # 检查各通道是否有数据更新
+        for i in range(8):
+            if data_flag[i]:
+                wifi_data[i] = wifi.get_data(i)
+        
+        # 更新PID参数
+        angle_kp = wifi_data[0]
+        speed_Kp = wifi_data[1] 
+        angle_kd = wifi_data[2]
+        roll_angle_Kp = wifi_data[3]
+        TARGET_SPEED = wifi_data[4]
+        roll_angle_Kd = wifi_data[5]
+        med_roll_angle = wifi_data[6]
+        speed_Kd = wifi_data[7]
+        
+        # 重新初始化PID控制器以应用新参数
+        pid_angle_speed.kp = angle_kp
+        pid_angle_speed.ki = angle_ki  # 保持原值
+        pid_angle_speed.kd = angle_kd
+        
+        pid_angle.kp = roll_angle_Kp
+        pid_angle.ki = roll_angle_Ki  # 保持原值
+        pid_angle.kd = roll_angle_Kd
+        
+        pid_speed.kp = speed_Kp
+        pid_speed.ki = speed_Ki  # 保持原值
+        pid_speed.kd = speed_Kd
+        
+        # 发送示波器数据 - 通道0显示imu_data_obj.Pitch，通道1、2显示motor1、motor2
+        wifi.send_oscilloscope(
+            imu_data_obj.Pitch, motor1, motor2, 
+            wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6], wifi_data[7])
+    
+    except:
+        pass
 
 # 卡尔曼滤波参数
 class KalmanFilter:
@@ -438,6 +503,9 @@ while True:
     if ccd_ticker_flag:
         ccd_ticker_flag = False
     
+    # WiFi调参更新
+    update_wifi_parameters()
+    
     if end_switch.value() != end_state:
         pit1.stop()
         pit3.stop()
@@ -446,6 +514,7 @@ while True:
         break
     
     gc.collect()
+
 
 
 
