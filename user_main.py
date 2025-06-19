@@ -37,7 +37,7 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # PID参数 - 进一步增强响应强度
-angle_kp, angle_ki, angle_kd = -2600.0, 0, -420.0  # 进一步增强角速度环响应
+angle_kp, angle_ki, angle_kd = -2400.0, 0, -400.0  # 进一步增强角速度环响应
 roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.09, 0, 0.28  # 进一步增强角度环响应
 speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
 # 线路跟踪PD控制器参数
@@ -446,5 +446,6 @@ while True:
         break
     
     gc.collect()
+
 
 
