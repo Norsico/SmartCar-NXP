@@ -6,14 +6,20 @@ import gc
 import time
 import math
 
-# WiFi调参初始化
-try:
-    wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.31.9", "8086")
-    wifi.send_str("WiFi parameter tuning ready.\r\n")
-    time.sleep_ms(500)
-    wifi_enabled = True
-    print("WiFi调参模块初始化成功")
-except:
+# wifi开关
+wifi_en = True
+
+if wifi_en:
+    # WiFi调参初始化
+    try:
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.31.9", "8086")
+        wifi.send_str("WiFi parameter tuning ready.\r\n")
+        time.sleep_ms(500)
+        wifi_enabled = True
+        print("WiFi调参模块初始化成功")
+    except:
+        wifi_enabled = False
+else:
     wifi_enabled = False
 
 # 全局变量
@@ -47,12 +53,12 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1900
+angle_kp = -1860
 angle_ki = 0
-angle_kd = 0  # 进一步增强角速度环响应
-roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.0935, 0, 0.28  # 进一步增强角度环响应
+angle_kd = 50 
+roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.1749, 0, 0.1  # 进一步增强角度环响应
 
-speed_Kp, speed_Ki, speed_Kd = 0.095, 0, 0.015
+speed_Kp, speed_Ki, speed_Kd = 0.099, 0, 4.0665
 
 # 线路跟踪PD控制器参数
 line_kp = 50  # 比例控制，快速响应
@@ -65,12 +71,12 @@ TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储
-wifi_data = [angle_kp, angle_ki, angle_kd, roll_angle_Kp, roll_angle_Ki, roll_angle_Kd, med_roll_angle]
+wifi_data = [line_kp, line_kd, angle_kd, roll_angle_Kp, TARGET_SPEED, roll_angle_Kd, med_roll_angle, speed_Kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
-    global angle_kp, angle_ki, angle_kd, roll_angle_Kp, roll_angle_Ki, roll_angle_Kd
-    global med_roll_angle, pid_angle_speed, pid_angle, wifi_data, motor1, motor2
+    global angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kd, TARGET_SPEED, line_kp, line_kd
+    global med_roll_angle, pid_angle_speed, pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
     
     if not wifi_enabled:
         return
@@ -80,32 +86,41 @@ def update_wifi_parameters():
         data_flag = wifi.data_analysis()
         
         # 检查各通道是否有数据更新
-        for i in range(7):
+        for i in range(8):
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
         # 更新PID参数
-        angle_kp = wifi_data[0]
-        angle_ki = wifi_data[1] 
+        line_kp = wifi_data[0]
+        line_kd = wifi_data[1] 
         angle_kd = wifi_data[2]
         roll_angle_Kp = wifi_data[3]
-        roll_angle_Ki = wifi_data[4]
+        TARGET_SPEED = wifi_data[4]
         roll_angle_Kd = wifi_data[5]
         med_roll_angle = wifi_data[6]
+        speed_Kd = wifi_data[7]
         
         # 重新初始化PID控制器以应用新参数
-        pid_angle_speed.kp = angle_kp
-        pid_angle_speed.ki = angle_ki
+        pid_angle_speed.kp = angle_kp  # 保持原值
+        pid_angle_speed.ki = angle_ki  # 保持原值
         pid_angle_speed.kd = angle_kd
         
         pid_angle.kp = roll_angle_Kp
-        pid_angle.ki = roll_angle_Ki
+        pid_angle.ki = roll_angle_Ki  # 保持原值
         pid_angle.kd = roll_angle_Kd
+        
+        pid_speed.kp = speed_Kp  # 保持原值
+        pid_speed.ki = speed_Ki  # 保持原值
+        pid_speed.kd = speed_Kd
+        
+        # 更新巡线PD控制器参数
+        pid_line.kp = line_kp
+        pid_line.kd = line_kd
         
         # 发送示波器数据 - 通道0显示imu_data_obj.Pitch，通道1、2显示motor1、motor2
         wifi.send_oscilloscope(
             imu_data_obj.Pitch, motor1, motor2, 
-            wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6], 0)
+            wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6], wifi_data[7])
     
     except:
         pass
@@ -319,11 +334,11 @@ def control_loop(timer):
     motor2 = motor1
     
     # CCD巡线控制
-    #motor1 -= line_control_output  # 左电机增加转向控制
-    #motor2 += line_control_output  # 右电机减少转向控制
+    motor1 -= line_control_output  # 左电机增加转向控制
+    motor2 += line_control_output  # 右电机减少转向控制
     
-    motor1 = limit(motor1, -7000, 7000)  # 增加电机输出限制，提高响应强度
-    motor2 = limit(motor2, -7000, 7000)  # 增加电机输出限制，提高响应强度
+    motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
+    motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
     
     motor_l.duty(motor1)
     motor_r.duty(motor2)
@@ -336,7 +351,7 @@ def control_loop(timer):
     if ticker_count == 0:
         avg_speed = (kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
-        speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移在±5度内
+        speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
 
 def encoder_update(timer):
     kalman_l.update(encoder_l.get())
@@ -345,13 +360,16 @@ def encoder_update(timer):
 def handle_ccd_data(arr):
     """
     处理CCD数据，找出大于阈值的数据点并计算它们的坐标中间值
+    增强版：能够识别多条线并选择最长的线，抗干扰能力强
     arr: CCD数据数组
     返回: 有效数据点的坐标中间值，如果没有有效数据点则返回-1
     """
-    threshold = 2000
-    valid_indices = []
+    threshold = 2500  # 提高阈值，减少噪声干扰
+    min_line_length = 5  # 最小线段长度，过滤小的干扰点
+    max_gap = 2  # 允许的最大间隙，小间隙会被忽略
     
-    # 找出所有大于阈值的数据点的索引
+    # 找出所有大于阈值的数据点
+    valid_indices = []
     for i, value in enumerate(arr):
         if value > threshold:
             valid_indices.append(i)
@@ -359,71 +377,70 @@ def handle_ccd_data(arr):
     if not valid_indices:
         return -1
     
-    # 如果检测点太少，直接返回中间值
-    if len(valid_indices) < 3:
-        return sum(valid_indices) / len(valid_indices)
-    
-    # 寻找最大的连续区域（主赛道）
-    max_group = []
-    current_group = [valid_indices[0]]
+    # 将连续的点分组，形成线段
+    line_segments = []
+    current_segment = [valid_indices[0]]
     
     for i in range(1, len(valid_indices)):
-        # 如果相邻点距离小于3个像素，认为是连续的
-        if valid_indices[i] - valid_indices[i-1] <= 3:
-            current_group.append(valid_indices[i])
+        gap = valid_indices[i] - valid_indices[i-1]
+        
+        if gap <= max_gap + 1:  # 连续或小间隙
+            current_segment.append(valid_indices[i])
         else:
-            # 断开了，检查当前组是否更大
-            if len(current_group) > len(max_group):
-                max_group = current_group.copy()
-            current_group = [valid_indices[i]]
+            # 间隙太大，结束当前线段
+            if len(current_segment) >= min_line_length:
+                line_segments.append(current_segment.copy())
+            current_segment = [valid_indices[i]]
     
-    # 检查最后一组
-    if len(current_group) > len(max_group):
-        max_group = current_group.copy()
+    # 添加最后一个线段
+    if len(current_segment) >= min_line_length:
+        line_segments.append(current_segment)
     
-    # 如果找到连续区域，使用该区域的中心
-    if max_group:
-        return sum(max_group) / len(max_group)
-    else:
-        # 没有连续区域，使用最接近中心的点
-        center = 64
-        closest_point = min(valid_indices, key=lambda x: abs(x - center))
-    # 如果有有效数据点，计算它们的中间值
-    if valid_indices:
-        middle_index = sum(valid_indices) / len(valid_indices)
-        return middle_index
-    else:
-        # 如果没有有效数据点，返回-1表示未找到赛道
+    if not line_segments:
         return -1
+    
+    # 找到最长的线段
+    longest_segment = max(line_segments, key=len)
+    
+    # 对最长线段进行质量评估
+    segment_length = len(longest_segment)
+    segment_start = longest_segment[0]
+    segment_end = longest_segment[-1]
+    segment_width = segment_end - segment_start + 1
+    
+    # 如果线段太短，可能是干扰
+    if segment_length < min_line_length:
+        return -1
+    
+    # 计算线段中心，使用加权平均减少边缘效应
+    if segment_length >= 10:
+        # 对于较长的线段，去掉两端的20%，使用中间部分计算中心
+        trim_count = max(1, segment_length // 5)
+        trimmed_segment = longest_segment[trim_count:-trim_count]
+        if trimmed_segment:
+            center_position = sum(trimmed_segment) / len(trimmed_segment)
+        else:
+            center_position = sum(longest_segment) / len(longest_segment)
+    else:
+        # 短线段直接计算中心
+        center_position = sum(longest_segment) / len(longest_segment)
+    
+    return center_position
 
-def calculate_line_deviation(middle1, middle2):
+def calculate_line_deviation(middle1):
     """
-    根据两个CCD的中间值计算线路偏差
-    middle1: CCD1的中间值 (上方摄像头)
-    middle2: CCD2的中间值 (下方摄像头)
+    根据CCD的中间值计算线路偏差
+    middle1: CCD的中间值
     返回: 线路偏差值
     """
     global line_deviation
     center = 62  # 赛道中心位置
-    current_deviation = 0
     
-    # 如果两个CCD都检测到线路
-    if middle1 != -1 and middle2 != -1:
-        # 检查两个CCD数据是否合理（差距不应该太大）
-        diff = abs(middle1 - middle2)
-        if diff < 15:  # 如果两个CCD读数相近，说明是直线
-            current_deviation = (middle1 * 0.6 + middle2 * 0.4) - center
-        else:
-            # 差距较大时，优先相信上方CCD（预判作用）
-            current_deviation = middle1 - center
-    elif middle1 != -1:
-        # 只有上方CCD检测到
+    # 如果CCD检测到线路
+    if middle1 != -1:
         current_deviation = middle1 - center
-    elif middle2 != -1:
-        # 只有下方CCD检测到
-        current_deviation = middle2 - center
     else:
-        # 都没检测到，保持上次偏差
+        # 没检测到，保持上次偏差
         return line_deviation
     
     # 异常值过滤：如果偏差变化过大，可能是干扰
@@ -444,20 +461,18 @@ def ccd_process(timer):
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
     
     try:
-        # 读取两个CCD的数据
-        ccd_data1 = ccd.get(0)  # 上方CCD
-        ccd_data2 = ccd.get(1)  # 下方CCD
+        # 读取CCD数据
+        ccd_data = ccd.get(0)  # 只使用上方CCD
         
         # 检查数据有效性
-        if not ccd_data1 or not ccd_data2:
+        if not ccd_data:
             return
         
         # 处理CCD数据获取中间值
-        middle_value1 = handle_ccd_data(ccd_data1)
-        middle_value2 = handle_ccd_data(ccd_data2)
+        middle_value = handle_ccd_data(ccd_data)
         
         # 计算线路偏差
-        new_deviation = calculate_line_deviation(middle_value1, middle_value2)
+        new_deviation = calculate_line_deviation(middle_value)
         
         # 只有当偏差有效时才更新
         if new_deviation is not None:
@@ -505,10 +520,6 @@ while True:
         pit1.stop()
         pit3.stop()
         pit2.stop()  # 停止CCD定时器
-        print("系统停止")
         break
     
     gc.collect()
-
-
-
