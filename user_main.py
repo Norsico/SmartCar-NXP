@@ -52,31 +52,52 @@ ccd = TSL1401(10)
 ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
+# IPS200屏幕初始化
+# 定义片选引脚
+cs = Pin('B29', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+# 拉高拉低一次 CS 片选确保屏幕通信时序正常
+cs.high()
+cs.low()
+# 定义控制引脚
+rst = Pin('B31', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+dc = Pin('B5', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+blk = Pin('C21', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
+# 新建 LCD 驱动实例
+drv = LCD_Drv(SPI_INDEX=2, BAUDRATE=60000000, DC_PIN=dc, RST_PIN=rst, LCD_TYPE=LCD_Drv.LCD200_TYPE)
+# 新建 LCD 实例
+lcd = LCD(drv)
+# color 接口设置屏幕显示颜色 [前景色,背景色]
+lcd.color(0xFFFF, 0x0000)
+# mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
+lcd.mode(2)
+# 清屏
+lcd.clear(0x0000)
+
 # PID参数 - 进一步增强响应强度
-angle_kp = -1848
+angle_kp = -1839
 angle_ki = 0
-angle_kd =63
+angle_kd =55
 
-roll_angle_Kp = 0.1614
+roll_angle_Kp = 0.095
 roll_angle_Ki = 0
-roll_angle_Kd = 0.1064  # 进一步增强角度环响应
+roll_angle_Kd = 0.0855  # 进一步增强角度环响应
 
-speed_Kp = 0.1048
+speed_Kp = 0.09530006
 speed_Ki = 0
 speed_Kd = 3.98
 
 # 线路跟踪PD控制器参数
-line_kp = 20  # 比例控制，快速响应
-line_kd = 42  # 微分控制，提高稳定性
+line_kp = 16.9  # 比例控制，快速响应
+line_kd = 415  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 45  # 设置小的前进速度进行测试
+TARGET_SPEED = 85  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, TARGET_SPEED, line_kp]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kd, TARGET_SPEED, line_kp]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
@@ -101,7 +122,7 @@ def update_wifi_parameters():
         roll_angle_Kp = wifi_data[2]
         roll_angle_Kd = wifi_data[3]
         speed_Kp = wifi_data[4]
-        speed_Kd = wifi_data[5]
+        line_kd = wifi_data[5]
         TARGET_SPEED = wifi_data[6]
         line_kp = wifi_data[7]
         
@@ -116,10 +137,11 @@ def update_wifi_parameters():
         
         pid_speed.kp = speed_Kp
         pid_speed.ki = speed_Ki  # 保持原值
-        pid_speed.kd = speed_Kd
+        pid_speed.kd = speed_Kd  # 保持原值
         
         # 更新巡线PD控制器参数
         pid_line.kp = line_kp
+        pid_line.kd = line_kd
         
         # 发送示波器数据 - 通道0显示imu_data_obj.Pitch，通道1、2显示motor1、motor2
         wifi.send_oscilloscope(
@@ -361,11 +383,12 @@ def encoder_update(timer):
     kalman_l.update(encoder_l.get())
     kalman_r.update(encoder_r.get())
 
-def handle_ccd_data(arr):
+def handle_ccd_data(arr, ccd_id):
     """
-    处理CCD数据，找出大于阈值的数据点并计算它们的坐标中间值
+    处理单个CCD数据，找出大于阈值的数据点并计算它们的坐标中间值
     增强版：能够识别多条线并选择最长的线，抗干扰能力强
     arr: CCD数据数组
+    ccd_id: CCD标识（0为上方，1为下方）
     返回: 有效数据点的坐标中间值，如果没有有效数据点则返回-1
     """
     threshold = 2500  # 提高阈值，减少噪声干扰
@@ -431,29 +454,64 @@ def handle_ccd_data(arr):
     
     return center_position
 
-def calculate_line_deviation(middle1):
+def calculate_dual_ccd_deviation(upper_center, lower_center):
     """
-    根据CCD的中间值计算线路偏差
-    middle1: CCD的中间值
-    返回: 线路偏差值
+    双CCD融合算法：根据上下两个CCD的中间值计算融合后的线路偏差
+    upper_center: 上方CCD中心位置（前瞻性强）
+    lower_center: 下方CCD中心位置（精确性强）
+    返回: 融合后的线路偏差值
     """
     global line_deviation
     center = 62  # 赛道中心位置
     
-    # 如果CCD检测到线路
-    if middle1 != -1:
-        current_deviation = middle1 - center
-    else:
-        # 没检测到，保持上次偏差
+    # 检查数据有效性
+    upper_valid = upper_center != -1
+    lower_valid = lower_center != -1
+    
+    if not upper_valid and not lower_valid:
+        # 都没检测到，保持上次偏差
         return line_deviation
     
+    # 融合策略
+    if upper_valid and lower_valid:
+        # 双CCD都有效时的融合算法
+        upper_deviation = upper_center - center
+        lower_deviation = lower_center - center
+        
+        # 检查两个CCD读数一致性
+        deviation_diff = abs(upper_deviation - lower_deviation)
+        
+        if deviation_diff < 15:
+            # 读数一致，说明是直线或缓弯
+            # 上方CCD权重稍高，提供前瞻性
+            current_deviation = upper_deviation * 0.6 + lower_deviation * 0.4
+        elif deviation_diff < 25:
+            # 读数有差异，可能是弯道
+            # 根据偏差大小动态调整权重
+            if abs(upper_deviation) > abs(lower_deviation):
+                # 上方CCD偏差更大，可能检测到即将到来的弯道
+                current_deviation = upper_deviation * 0.5 + lower_deviation * 0.5
+            else:
+                # 下方CCD偏差更大，以精确跟踪为主
+                current_deviation = upper_deviation * 0.3 + lower_deviation * 0.7
+        else:
+            # 读数差异很大，可能有干扰，优先相信下方CCD
+            current_deviation = upper_deviation * 0.2 + lower_deviation * 0.8
+            
+    elif upper_valid:
+        # 只有上方CCD有效
+        current_deviation = upper_center - center
+    else:
+        # 只有下方CCD有效
+        current_deviation = lower_center - center
+    
     # 异常值过滤：如果偏差变化过大，可能是干扰
-    if abs(current_deviation - line_deviation) > 20:
+    if abs(current_deviation - line_deviation) > 25:
         # 偏差变化太大，使用加权平均平滑过渡
-        current_deviation = line_deviation * 0.7 + current_deviation * 0.3
+        current_deviation = line_deviation * 0.6 + current_deviation * 0.4
     
     # 限制偏差范围
-    current_deviation = max(-30, min(30, current_deviation))
+    current_deviation = max(-35, min(35, current_deviation))
     
     return current_deviation
 
@@ -465,18 +523,26 @@ def ccd_process(timer):
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
     
     try:
-        # 读取CCD数据
-        ccd_data = ccd.get(0)  # 只使用上方CCD
+        # 读取双CCD数据
+        ccd_data_upper = ccd.get(0)  # 上方CCD（前瞻性）
+        ccd_data_lower = ccd.get(1)  # 下方CCD（精确性）
         
         # 检查数据有效性
-        if not ccd_data:
+        if not ccd_data_upper and not ccd_data_lower:
             return
         
-        # 处理CCD数据获取中间值
-        middle_value = handle_ccd_data(ccd_data)
+        # 处理双CCD数据获取中间值
+        upper_center = -1
+        lower_center = -1
         
-        # 计算线路偏差
-        new_deviation = calculate_line_deviation(middle_value)
+        if ccd_data_upper:
+            upper_center = handle_ccd_data(ccd_data_upper, 0)
+            
+        if ccd_data_lower:
+            lower_center = handle_ccd_data(ccd_data_lower, 1)
+        
+        # 使用双CCD融合算法计算线路偏差
+        new_deviation = calculate_dual_ccd_deviation(upper_center, lower_center)
         
         # 只有当偏差有效时才更新
         if new_deviation is not None:
@@ -487,6 +553,24 @@ def ccd_process(timer):
             
             # 限制线路控制输出
             line_control_output = limit(line_control_output, -2000, 2000)
+            
+        # 在屏幕上显示CCD数据波形
+        try:
+            # 显示上方CCD (CCD0) 在屏幕上半部分
+            if ccd_data_upper:
+                lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
+            
+            # 显示下方CCD (CCD1) 在屏幕下半部分
+            if ccd_data_lower:
+                lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
+                
+            # 在屏幕上显示一些关键信息
+            # lcd.str(0, 200, f"U:{upper_center:.0f} L:{lower_center:.0f} D:{line_deviation:.1f}", size=12)
+        except:
+            pass  # 显示出错不影响主要功能
+        
+        # 调试信息（可选）
+        # print(f"上方CCD: {upper_center:.1f}, 下方CCD: {lower_center:.1f}, 融合偏差: {line_deviation:.1f}")
             
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
@@ -527,4 +611,5 @@ while True:
         break
     
     gc.collect()
+
 
