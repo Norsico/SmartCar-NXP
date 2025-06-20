@@ -53,25 +53,30 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1860
+angle_kp = -1848
 angle_ki = 0
-angle_kd = 50 
-roll_angle_Kp, roll_angle_Ki, roll_angle_Kd = 0.1749, 0, 0.1  # 进一步增强角度环响应
+angle_kd =63
 
-speed_Kp, speed_Ki, speed_Kd = 0.099, 0, 4.0665
+roll_angle_Kp = 0.1614
+roll_angle_Ki = 0
+roll_angle_Kd = 0.1064  # 进一步增强角度环响应
+
+speed_Kp = 0.1048
+speed_Ki = 0
+speed_Kd = 3.98
 
 # 线路跟踪PD控制器参数
-line_kp = 50  # 比例控制，快速响应
-line_kd = 40  # 微分控制，提高稳定性
+line_kp = 20  # 比例控制，快速响应
+line_kd = 42  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 34  # 调整平衡角度
-TARGET_SPEED = 0  # 设置小的前进速度进行测试
+med_roll_angle = 34.1  # 调整平衡角度
+TARGET_SPEED = 45  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储
-wifi_data = [line_kp, line_kd, angle_kd, roll_angle_Kp, TARGET_SPEED, roll_angle_Kd, med_roll_angle, speed_Kd]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, TARGET_SPEED, line_kp]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
@@ -91,17 +96,17 @@ def update_wifi_parameters():
                 wifi_data[i] = wifi.get_data(i)
         
         # 更新PID参数
-        line_kp = wifi_data[0]
-        line_kd = wifi_data[1] 
-        angle_kd = wifi_data[2]
-        roll_angle_Kp = wifi_data[3]
-        TARGET_SPEED = wifi_data[4]
-        roll_angle_Kd = wifi_data[5]
-        med_roll_angle = wifi_data[6]
-        speed_Kd = wifi_data[7]
+        angle_kp = wifi_data[0]
+        angle_kd = wifi_data[1]
+        roll_angle_Kp = wifi_data[2]
+        roll_angle_Kd = wifi_data[3]
+        speed_Kp = wifi_data[4]
+        speed_Kd = wifi_data[5]
+        TARGET_SPEED = wifi_data[6]
+        line_kp = wifi_data[7]
         
         # 重新初始化PID控制器以应用新参数
-        pid_angle_speed.kp = angle_kp  # 保持原值
+        pid_angle_speed.kp = angle_kp
         pid_angle_speed.ki = angle_ki  # 保持原值
         pid_angle_speed.kd = angle_kd
         
@@ -109,18 +114,17 @@ def update_wifi_parameters():
         pid_angle.ki = roll_angle_Ki  # 保持原值
         pid_angle.kd = roll_angle_Kd
         
-        pid_speed.kp = speed_Kp  # 保持原值
+        pid_speed.kp = speed_Kp
         pid_speed.ki = speed_Ki  # 保持原值
         pid_speed.kd = speed_Kd
         
         # 更新巡线PD控制器参数
         pid_line.kp = line_kp
-        pid_line.kd = line_kd
         
         # 发送示波器数据 - 通道0显示imu_data_obj.Pitch，通道1、2显示motor1、motor2
         wifi.send_oscilloscope(
             imu_data_obj.Pitch, motor1, motor2, 
-            wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6], wifi_data[7])
+            wifi_data[2], wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6])
     
     except:
         pass
@@ -523,3 +527,4 @@ while True:
         break
     
     gc.collect()
+
