@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True
+wifi_en = False
 
 if wifi_en:
     # WiFi调参初始化
@@ -33,6 +33,57 @@ ccd_ticker_flag = False
 ccd_ticker_count = 0
 line_deviation = 0  # 线路偏差
 line_control_output = 0  # 线路控制输出
+
+# CCD算法参数 - 移植自C语言示例
+CCD1_SET_WIDTH = 38  # 近端CCD设定宽度
+CCD2_SET_WIDTH = 20  # 远端CCD设定宽度
+
+# 阈值参数 - 需要调试
+THRESHOLD_MULTIPLE_1 = 19  # CCD1阈值倍数 (%)
+THRESHOLD_MULTIPLE_2 = 19  # CCD2阈值倍数 (%)
+THRESHOLD_1 = 42  # CCD1二值化阈值 (%)
+THRESHOLD_2 = 42  # CCD2二值化阈值 (%)
+
+# CCD信息类
+class CCDInformation:
+    def __init__(self):
+        self.max_val = 0
+        self.min_val = 0
+        self.threshold = 0
+        self.aver = 0
+        self.bin_thrd = 0
+
+# 赛道信息类
+class TrackInformation:
+    def __init__(self):
+        # CCD1(近端)原图像
+        self.left_sideline1 = 0
+        self.right_sideline1 = 0
+        self.middle_sideline1 = 63.0
+        self.middle_sideline1_last = 63.0
+        self.width1 = 0
+        
+        # CCD2(远端)原图像
+        self.left_sideline2 = 0
+        self.right_sideline2 = 0
+        self.middle_sideline2 = 63.0
+        self.middle_sideline2_last = 63.0
+        self.width2 = 0
+
+# 全局CCD对象
+CCD1 = CCDInformation()  # 近端CCD
+CCD2 = CCDInformation()  # 远端CCD
+Trk = TrackInformation()  # 赛道信息
+
+# 边界检测标志
+CCD1_left_flag = False
+CCD1_right_flag = False
+CCD2_left_flag = False
+CCD2_right_flag = False
+
+# 黑白场景标志
+black_write_1 = False
+black_write_2 = False
 
 # 硬件初始化
 end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
@@ -82,27 +133,28 @@ roll_angle_Kp = 0.095
 roll_angle_Ki = 0
 roll_angle_Kd = 0.0855  # 进一步增强角度环响应
 
-speed_Kp = 0.09530006
+speed_Kp = 0.1
 speed_Ki = 0
 speed_Kd = 3.98
 
 # 线路跟踪PD控制器参数
-line_kp = 16.9  # 比例控制，快速响应
-line_kd = 415  # 微分控制，提高稳定性
+line_kp = 15.2  # 比例控制，快速响应
+line_kd = 440  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 85  # 设置小的前进速度进行测试
+TARGET_SPEED = 70  # 设置小的前进速度进行测试
 ticker_count = 0
 
-# WiFi调参数据存储
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kd, TARGET_SPEED, line_kp]
+# WiFi调参数据存储 - 前四个通道改为CCD阈值参数
+wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, speed_Kp, line_kd, TARGET_SPEED, line_kp]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
     global angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kd, TARGET_SPEED, line_kp, line_kd
     global med_roll_angle, pid_angle_speed, pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
+    global THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2
     
     if not wifi_enabled:
         return
@@ -116,11 +168,13 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新PID参数
-        angle_kp = wifi_data[0]
-        angle_kd = wifi_data[1]
-        roll_angle_Kp = wifi_data[2]
-        roll_angle_Kd = wifi_data[3]
+        # 更新CCD阈值参数 (前4个通道)
+        THRESHOLD_MULTIPLE_1 = wifi_data[0]
+        THRESHOLD_MULTIPLE_2 = wifi_data[1]
+        THRESHOLD_1 = wifi_data[2]
+        THRESHOLD_2 = wifi_data[3]
+        
+        # 更新其他参数
         speed_Kp = wifi_data[4]
         line_kd = wifi_data[5]
         TARGET_SPEED = wifi_data[6]
@@ -143,10 +197,10 @@ def update_wifi_parameters():
         pid_line.kp = line_kp
         pid_line.kd = line_kd
         
-        # 发送示波器数据 - 通道0显示imu_data_obj.Pitch，通道1、2显示motor1、motor2
+        # 发送示波器数据 - 显示CCD相关参数和电机输出
         wifi.send_oscilloscope(
-            imu_data_obj.Pitch, motor1, motor2, 
-            wifi_data[2], wifi_data[3], wifi_data[4], wifi_data[5], wifi_data[6])
+            line_deviation, motor1, motor2, 
+            THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, line_control_output)
     
     except:
         pass
@@ -383,198 +437,362 @@ def encoder_update(timer):
     kalman_l.update(encoder_l.get())
     kalman_r.update(encoder_r.get())
 
-def handle_ccd_data(arr, ccd_id):
-    """
-    处理单个CCD数据，找出大于阈值的数据点并计算它们的坐标中间值
-    增强版：能够识别多条线并选择最长的线，抗干扰能力强
-    arr: CCD数据数组
-    ccd_id: CCD标识（0为上方，1为下方）
-    返回: 有效数据点的坐标中间值，如果没有有效数据点则返回-1
-    """
-    threshold = 2500  # 提高阈值，减少噪声干扰
-    min_line_length = 5  # 最小线段长度，过滤小的干扰点
-    max_gap = 2  # 允许的最大间隙，小间隙会被忽略
-    
-    # 找出所有大于阈值的数据点
-    valid_indices = []
-    for i, value in enumerate(arr):
-        if value > threshold:
-            valid_indices.append(i)
-    
-    if not valid_indices:
-        return -1
-    
-    # 将连续的点分组，形成线段
-    line_segments = []
-    current_segment = [valid_indices[0]]
-    
-    for i in range(1, len(valid_indices)):
-        gap = valid_indices[i] - valid_indices[i-1]
-        
-        if gap <= max_gap + 1:  # 连续或小间隙
-            current_segment.append(valid_indices[i])
-        else:
-            # 间隙太大，结束当前线段
-            if len(current_segment) >= min_line_length:
-                line_segments.append(current_segment.copy())
-            current_segment = [valid_indices[i]]
-    
-    # 添加最后一个线段
-    if len(current_segment) >= min_line_length:
-        line_segments.append(current_segment)
-    
-    if not line_segments:
-        return -1
-    
-    # 找到最长的线段
-    longest_segment = max(line_segments, key=len)
-    
-    # 对最长线段进行质量评估
-    segment_length = len(longest_segment)
-    segment_start = longest_segment[0]
-    segment_end = longest_segment[-1]
-    segment_width = segment_end - segment_start + 1
-    
-    # 如果线段太短，可能是干扰
-    if segment_length < min_line_length:
-        return -1
-    
-    # 计算线段中心，使用加权平均减少边缘效应
-    if segment_length >= 10:
-        # 对于较长的线段，去掉两端的20%，使用中间部分计算中心
-        trim_count = max(1, segment_length // 5)
-        trimmed_segment = longest_segment[trim_count:-trim_count]
-        if trimmed_segment:
-            center_position = sum(trimmed_segment) / len(trimmed_segment)
-        else:
-            center_position = sum(longest_segment) / len(longest_segment)
-    else:
-        # 短线段直接计算中心
-        center_position = sum(longest_segment) / len(longest_segment)
-    
-    return center_position
+def ccd_image_init():
+    """CCD图像初始化"""
+    global Trk, CCD1, CCD2
+    Trk.middle_sideline1 = 63.0
+    Trk.middle_sideline2 = 63.0
+    CCD1.bin_thrd = 0
+    CCD2.bin_thrd = 0
 
+def ccd1_get(ccd_data):
+    """CCD1数据获取和处理 - 近端CCD"""
+    global CCD1, THRESHOLD_MULTIPLE_1, THRESHOLD_1
+    
+    if not ccd_data or len(ccd_data) < 128:
+        return
+    
+    # 计算最大最小值 (范围5-122，对应C代码)
+    CCD1.max_val = 0
+    CCD1.min_val = ccd_data[4] if len(ccd_data) > 4 else 0
+    CCD1.aver = 0
+    
+    # 统计最大最小值
+    for i in range(5, min(123, len(ccd_data))):
+        if ccd_data[i] > CCD1.max_val:
+            CCD1.max_val = ccd_data[i]
+        if ccd_data[i] < CCD1.min_val:
+            CCD1.min_val = ccd_data[i]
+    
+    # 计算中心区域平均值 (48-78)
+    count = 0
+    total = 0
+    for i in range(48, min(78, len(ccd_data))):
+        total += ccd_data[i]
+        count += 1
+    
+    if count > 0:
+        CCD1.aver = total // count
+    
+    # 二值化阈值计算
+    if CCD1.bin_thrd == 0:
+        CCD1.bin_thrd = 1
+    elif CCD1.bin_thrd == 1:
+        CCD1.bin_thrd = (CCD1.aver * THRESHOLD_1) // 100
+    
+    # 动态阈值计算
+    if CCD1.max_val + CCD1.min_val > 0:
+        CCD1.threshold = ((CCD1.max_val - CCD1.min_val) * 100 * THRESHOLD_MULTIPLE_1) // ((CCD1.max_val + CCD1.min_val) * 100)
+
+def ccd2_get(ccd_data):
+    """CCD2数据获取和处理 - 远端CCD"""
+    global CCD2, THRESHOLD_MULTIPLE_2, THRESHOLD_2
+    
+    if not ccd_data or len(ccd_data) < 128:
+        return
+    
+    # 计算最大最小值 (范围10-117，对应C代码)
+    CCD2.max_val = 0
+    CCD2.min_val = ccd_data[4] if len(ccd_data) > 4 else 0
+    CCD2.aver = 0
+    
+    # 统计最大最小值
+    for i in range(10, min(118, len(ccd_data))):
+        if ccd_data[i] > CCD2.max_val:
+            CCD2.max_val = ccd_data[i]
+        if ccd_data[i] < CCD2.min_val:
+            CCD2.min_val = ccd_data[i]
+    
+    # 计算中心区域平均值 (53-73)
+    count = 0
+    total = 0
+    for i in range(53, min(73, len(ccd_data))):
+        total += ccd_data[i]
+        count += 1
+    
+    if count > 0:
+        CCD2.aver = total // count
+    
+    # 二值化阈值计算
+    if CCD2.bin_thrd == 0:
+        CCD2.bin_thrd = 1
+    elif CCD2.bin_thrd == 1:
+        CCD2.bin_thrd = (CCD2.aver * THRESHOLD_2) // 100
+    
+    # 动态阈值计算
+    if CCD2.max_val + CCD2.min_val > 0:
+        CCD2.threshold = ((CCD2.max_val - CCD2.min_val) * 100 * THRESHOLD_MULTIPLE_2) // ((CCD2.max_val + CCD2.min_val) * 100)
+
+def left_right_sideline(ccd_data1, ccd_data2):
+    """左右边界检测 - 移植自C语言核心算法"""
+    global Trk, CCD1, CCD2, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
+    global black_write_1, black_write_2
+    
+    if not ccd_data1 or not ccd_data2:
+        return
+    
+    # 保存上次中线位置
+    Trk.middle_sideline1_last = Trk.middle_sideline1
+    Trk.middle_sideline2_last = Trk.middle_sideline2
+    
+    # CCD1边界检测 (近端)
+    start_pos = int(Trk.middle_sideline1_last)
+    
+    # 左边界检测
+    CCD1_left_flag = False
+    for i in range(start_pos, 4, -1):
+        if i >= 5 and i < len(ccd_data1):
+            # 梯度检测算法
+            if (ccd_data1[i] + ccd_data1[i-5]) > 0:
+                gradient = abs(ccd_data1[i] - ccd_data1[i-5]) * 100 // (ccd_data1[i] + ccd_data1[i-5])
+                if gradient > CCD1.threshold and ccd_data1[i] > ccd_data1[i-5]:
+                    Trk.left_sideline1 = i
+                    CCD1_left_flag = True
+                    break
+    
+    if not CCD1_left_flag:
+        Trk.left_sideline1 = 5
+    
+    # 右边界检测
+    CCD1_right_flag = False
+    for i in range(start_pos, min(122, len(ccd_data1))):
+        if i + 5 < len(ccd_data1):
+            # 梯度检测算法
+            if (ccd_data1[i] + ccd_data1[i+5]) > 0:
+                gradient = abs(ccd_data1[i] - ccd_data1[i+5]) * 100 // (ccd_data1[i] + ccd_data1[i+5])
+                if gradient > CCD1.threshold and ccd_data1[i] > ccd_data1[i+5]:
+                    Trk.right_sideline1 = i
+                    CCD1_right_flag = True
+                    break
+    
+    if not CCD1_right_flag:
+        Trk.right_sideline1 = 122
+    
+    # 黑白场景判断
+    black_write_1 = CCD1.aver < CCD1.bin_thrd
+    
+    # 单边丢失补偿
+    if CCD1_left_flag and not CCD1_right_flag:
+        for i in range(Trk.left_sideline1, min(122, len(ccd_data1))):
+            if i + 5 < len(ccd_data1) and (ccd_data1[i] + ccd_data1[i+5]) > 0:
+                gradient = abs(ccd_data1[i] - ccd_data1[i+5]) * 100 // (ccd_data1[i] + ccd_data1[i+5])
+                if gradient > CCD1.threshold and ccd_data1[i] > ccd_data1[i+5]:
+                    Trk.right_sideline1 = i
+                    CCD1_right_flag = True
+                    break
+    
+    elif not CCD1_left_flag and CCD1_right_flag:
+        for i in range(Trk.right_sideline1, 4, -1):
+            if i >= 5 and (ccd_data1[i] + ccd_data1[i-5]) > 0:
+                gradient = abs(ccd_data1[i] - ccd_data1[i-5]) * 100 // (ccd_data1[i] + ccd_data1[i-5])
+                if gradient > CCD1.threshold and ccd_data1[i] > ccd_data1[i-5]:
+                    Trk.left_sideline1 = i
+                    CCD1_left_flag = True
+                    break
+    
+    # CCD2边界检测 (远端) - 类似逻辑
+    start_pos2 = int(Trk.middle_sideline2_last)
+    
+    # 左边界检测
+    CCD2_left_flag = False
+    for i in range(start_pos2, 9, -1):
+        if i >= 10 and i < len(ccd_data2):
+            if (ccd_data2[i] + ccd_data2[i-5]) > 0:
+                gradient = abs(ccd_data2[i] - ccd_data2[i-5]) * 100 // (ccd_data2[i] + ccd_data2[i-5])
+                if gradient > CCD2.threshold and ccd_data2[i] > ccd_data2[i-5]:
+                    Trk.left_sideline2 = i
+                    CCD2_left_flag = True
+                    break
+    
+    if not CCD2_left_flag:
+        Trk.left_sideline2 = 10
+    
+    # 右边界检测
+    CCD2_right_flag = False
+    for i in range(start_pos2, min(117, len(ccd_data2))):
+        if i + 5 < len(ccd_data2):
+            if (ccd_data2[i] + ccd_data2[i+5]) > 0:
+                gradient = abs(ccd_data2[i] - ccd_data2[i+5]) * 100 // (ccd_data2[i] + ccd_data2[i+5])
+                if gradient > CCD2.threshold and ccd_data2[i] > ccd_data2[i+5]:
+                    Trk.right_sideline2 = i
+                    CCD2_right_flag = True
+                    break
+    
+    if not CCD2_right_flag:
+        Trk.right_sideline2 = 117
+    
+    # CCD2单边丢失补偿
+    if CCD2_left_flag and not CCD2_right_flag:
+        for i in range(Trk.left_sideline2, min(117, len(ccd_data2))):
+            if i + 10 < len(ccd_data2) and (ccd_data2[i] + ccd_data2[i+10]) > 0:
+                gradient = abs(ccd_data2[i] - ccd_data2[i+10]) * 100 // (ccd_data2[i] + ccd_data2[i+10])
+                if gradient > CCD2.threshold and ccd_data2[i] > ccd_data2[i+10]:
+                    Trk.right_sideline2 = i
+                    CCD2_right_flag = True
+                    break
+    
+    elif not CCD2_left_flag and CCD2_right_flag:
+        for i in range(Trk.right_sideline2, 9, -1):
+            if i >= 10 and (ccd_data2[i] + ccd_data2[i-10]) > 0:
+                gradient = abs(ccd_data2[i] - ccd_data2[i-10]) * 100 // (ccd_data2[i] + ccd_data2[i-10])
+                if gradient > CCD2.threshold and ccd_data2[i] > ccd_data2[i-10]:
+                    Trk.left_sideline2 = i
+                    CCD2_left_flag = True
+                    break
+    
+    # 黑白场景判断
+    black_write_2 = CCD2.aver < CCD2.bin_thrd
+
+def middle_sideline():
+    """中线计算"""
+    global Trk
+    
+    # 基础中线计算
+    Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
+    Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+    
+    # 宽度计算
+    Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
+    Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
+
+def ccd_processing(ccd_data1, ccd_data2):
+    """CCD主处理函数 - 移植自C语言示例"""
+    # 1. CCD数据获取和预处理
+    ccd1_get(ccd_data1)  # 近端CCD
+    ccd2_get(ccd_data2)  # 远端CCD
+    
+    # 2. 边界检测
+    left_right_sideline(ccd_data1, ccd_data2)
+    
+    # 3. 中线计算
+    middle_sideline()
+    
+    # 返回融合后的中线偏差
+    center = 63.0  # 赛道中心
+    
+    # 双CCD融合策略 - 近端为主，远端辅助
+    if CCD1_left_flag and CCD1_right_flag:
+        # 近端双边界都有效，优先使用
+        deviation = Trk.middle_sideline1 - center
+    elif CCD2_left_flag and CCD2_right_flag:
+        # 远端双边界有效，近端无效时使用
+        deviation = Trk.middle_sideline2 - center
+    elif CCD1_left_flag or CCD1_right_flag:
+        # 近端单边有效
+        deviation = Trk.middle_sideline1 - center
+    elif CCD2_left_flag or CCD2_right_flag:
+        # 远端单边有效
+        deviation = Trk.middle_sideline2 - center
+    else:
+        # 都无效，保持上次偏差
+        deviation = line_deviation
+    
+    return deviation
+
+# 保留原来的calculate_dual_ccd_deviation函数名以兼容现有代码
 def calculate_dual_ccd_deviation(upper_center, lower_center):
-    """
-    双CCD融合算法：根据上下两个CCD的中间值计算融合后的线路偏差
-    upper_center: 上方CCD中心位置（前瞻性强）
-    lower_center: 下方CCD中心位置（精确性强）
-    返回: 融合后的线路偏差值
-    """
+    """兼容函数 - 简化版本"""
     global line_deviation
-    center = 62  # 赛道中心位置
+    center = 62
     
     # 检查数据有效性
     upper_valid = upper_center != -1
     lower_valid = lower_center != -1
     
     if not upper_valid and not lower_valid:
-        # 都没检测到，保持上次偏差
         return line_deviation
     
-    # 融合策略
     if upper_valid and lower_valid:
-        # 双CCD都有效时的融合算法
-        upper_deviation = upper_center - center
-        lower_deviation = lower_center - center
-        
-        # 检查两个CCD读数一致性
-        deviation_diff = abs(upper_deviation - lower_deviation)
-        
-        if deviation_diff < 15:
-            # 读数一致，说明是直线或缓弯
-            # 上方CCD权重稍高，提供前瞻性
-            current_deviation = upper_deviation * 0.6 + lower_deviation * 0.4
-        elif deviation_diff < 25:
-            # 读数有差异，可能是弯道
-            # 根据偏差大小动态调整权重
-            if abs(upper_deviation) > abs(lower_deviation):
-                # 上方CCD偏差更大，可能检测到即将到来的弯道
-                current_deviation = upper_deviation * 0.5 + lower_deviation * 0.5
-            else:
-                # 下方CCD偏差更大，以精确跟踪为主
-                current_deviation = upper_deviation * 0.3 + lower_deviation * 0.7
-        else:
-            # 读数差异很大，可能有干扰，优先相信下方CCD
-            current_deviation = upper_deviation * 0.2 + lower_deviation * 0.8
-            
+        current_deviation = upper_center * 0.6 + lower_center * 0.4 - center
     elif upper_valid:
-        # 只有上方CCD有效
         current_deviation = upper_center - center
     else:
-        # 只有下方CCD有效
         current_deviation = lower_center - center
-    
-    # 异常值过滤：如果偏差变化过大，可能是干扰
-    if abs(current_deviation - line_deviation) > 25:
-        # 偏差变化太大，使用加权平均平滑过渡
-        current_deviation = line_deviation * 0.6 + current_deviation * 0.4
     
     # 限制偏差范围
     current_deviation = max(-35, min(35, current_deviation))
-    
     return current_deviation
 
 def ccd_process(timer):
-    """CCD数据处理函数，独立定时器运行"""
+    """CCD数据处理函数，独立定时器运行 - 使用新的算法"""
     global ccd_ticker_flag, ccd_ticker_count, line_deviation, line_control_output
     
     ccd_ticker_flag = True
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
     
     try:
-        # 读取双CCD数据
-        ccd_data_upper = ccd.get(0)  # 上方CCD（前瞻性）
-        ccd_data_lower = ccd.get(1)  # 下方CCD（精确性）
+        # 读取双CCD数据 - 注意：近端ccd.get(1)，远端ccd.get(0)
+        ccd_data_upper = ccd.get(0)  # 远端CCD
+        ccd_data_lower = ccd.get(1)  # 近端CCD
         
         # 检查数据有效性
         if not ccd_data_upper and not ccd_data_lower:
             return
         
-        # 处理双CCD数据获取中间值
-        upper_center = -1
-        lower_center = -1
+        # 使用新的CCD处理算法 - 参数顺序：近端，远端
+        new_deviation = ccd_processing(ccd_data_lower, ccd_data_upper)
         
-        if ccd_data_upper:
-            upper_center = handle_ccd_data(ccd_data_upper, 0)
-            
-        if ccd_data_lower:
-            lower_center = handle_ccd_data(ccd_data_lower, 1)
-        
-        # 使用双CCD融合算法计算线路偏差
-        new_deviation = calculate_dual_ccd_deviation(upper_center, lower_center)
-        
-        # 只有当偏差有效时才更新
-        if new_deviation is not None:
+        # 平滑过渡，避免突变
+        if abs(new_deviation - line_deviation) > 15:
+            line_deviation = line_deviation * 0.7 + new_deviation * 0.3
+        else:
             line_deviation = new_deviation
             
             # 使用PD控制器计算线路控制输出
             line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
             
             # 限制线路控制输出
-            line_control_output = limit(line_control_output, -2000, 2000)
+        line_control_output = limit(line_control_output, -3000, 3000)
             
         # 在屏幕上显示CCD数据波形
         try:
-            # 显示上方CCD (CCD0) 在屏幕上半部分
+            # 显示远端CCD (CCD0) 在屏幕上半部分
             if ccd_data_upper:
                 lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
             
-            # 显示下方CCD (CCD1) 在屏幕下半部分
+            # 显示近端CCD (CCD1) 在屏幕下半部分
             if ccd_data_lower:
                 lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
                 
-            # 在屏幕上显示一些关键信息
-            # lcd.str(0, 200, f"U:{upper_center:.0f} L:{lower_center:.0f} D:{line_deviation:.1f}", size=12)
+            # 显示边界线和中线 - 使用line函数画垂直线
+            try:
+                # 画左边界线 (红色)
+                if CCD1_left_flag and 0 <= Trk.left_sideline1 <= 127:
+                    lcd.line(Trk.left_sideline1, 96, Trk.left_sideline1, 120, color=0xF800, thick=2)
+                
+                # 画右边界线 (红色)
+                if CCD1_right_flag and 0 <= Trk.right_sideline1 <= 127:
+                    lcd.line(Trk.right_sideline1, 96, Trk.right_sideline1, 120, color=0xF800, thick=2)
+                
+                # 画中线 (绿色)
+                if 0 <= int(Trk.middle_sideline1) <= 127:
+                    lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
+                
+                # 显示调试信息 (英文) - 移到更下方避免覆盖CCD图像
+                lcd.str12(0, 195, f"L:{Trk.left_sideline1:3d} R:{Trk.right_sideline1:3d}", 0xFFFF)
+                lcd.str12(0, 207, f"M:{Trk.middle_sideline1:5.1f} D:{line_deviation:5.1f}", 0xFFFF)
+                lcd.str12(0, 219, f"W1:{Trk.width1:3d} W2:{Trk.width2:3d}", 0xFFFF)
+                lcd.str12(0, 231, f"T1:{CCD1.threshold:3d} T2:{CCD2.threshold:3d}", 0xFFFF)
+                
+                # 显示边界检测状态
+                status_str = ""
+                if CCD1_left_flag: status_str += "L1"
+                if CCD1_right_flag: status_str += "R1"
+                if CCD2_left_flag: status_str += "L2"
+                if CCD2_right_flag: status_str += "R2"
+                if black_write_1: status_str += "B1"
+                if black_write_2: status_str += "B2"
+                lcd.str12(0, 243, f"Flag:{status_str}", 0x07E0)
+                
+            except:
+                pass
+                
         except:
             pass  # 显示出错不影响主要功能
-        
-        # 调试信息（可选）
-        # print(f"上方CCD: {upper_center:.1f}, 下方CCD: {lower_center:.1f}, 融合偏差: {line_deviation:.1f}")
             
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
-        line_control_output *= 0.8
+        line_control_output *= 0.9
 
 # 初始化定时器
 pit1 = ticker(1)
@@ -589,9 +807,12 @@ pit2.callback(ccd_process)  # CCD处理回调
 
 # 启动系统
 imu_init()
+ccd_image_init()  # 初始化CCD图像处理
 pit1.start(1)
 pit3.start(10)
 pit2.start(8)  # CCD
+
+print("inited")
 
 # 主循环
 while True:
@@ -611,5 +832,3 @@ while True:
         break
     
     gc.collect()
-
-
