@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 if wifi_en:
     # WiFi调参初始化
@@ -34,45 +34,30 @@ ccd_ticker_count = 0
 line_deviation = 0  # 线路偏差
 line_control_output = 0  # 线路控制输出
 
+# 按键相关变量
+key = KEY_HANDLER(10)  # 按键扫描周期为10
+
 # CCD算法参数 - 移植自C语言示例
 CCD1_SET_WIDTH = 38  # 近端CCD设定宽度
 CCD2_SET_WIDTH = 20  # 远端CCD设定宽度
 
 # 阈值参数 - 需要调试
-THRESHOLD_MULTIPLE_1 = 19  # CCD1阈值倍数 (%)
-THRESHOLD_MULTIPLE_2 = 19  # CCD2阈值倍数 (%)
+THRESHOLD_MULTIPLE_1 = 18.8  # CCD1阈值倍数 (%)
+THRESHOLD_MULTIPLE_2 = 45.7  # CCD2阈值倍数 (%)
 THRESHOLD_1 = 42  # CCD1二值化阈值 (%)
 THRESHOLD_2 = 42  # CCD2二值化阈值 (%)
 
 # 环岛状态定义
 NO_RING = 0
 FIND_RING = 1
-READY_IN_RING = 2
-IN_RING = 3
-READY_OUT_RING = 4
-OUT_RING = 5
-READY_NO_RING = 6
 
 # 环岛相关全局变量
 ring_state = NO_RING
 ring_left = False
 ring_right = False
-ring_speed = 0
-pid_ring_flag = 0
-encoder_ring = 0
-angle_ring = 0
-angle_gz = 0  # 陀螺仪累积角度
-
-# 环岛参数 - 可通过WiFi调参
-READY_IN_RING_ENCODER = 50  # 准备进入环岛的编码器距离
-IN_RING_ENCODER = 30  # 进入环岛的编码器距离
-READY_OUT_RING_ANGLE = 180  # 准备出环岛的角度
-OUT_RING_ANGLE = 270  # 出环岛的角度
-NO_RING_ENCODER = 80  # 退出环岛状态的编码器距离
 
 # 环岛检测阈值
 RING_QULU_THRESHOLD = 20  # 环岛曲率检测阈值
-RING_QULU_EXIT_THRESHOLD = 30  # 环岛退出曲率阈值
 
 # 移除十字路口和坡道检测功能，只保留环岛检测
 
@@ -215,9 +200,6 @@ ticker_count = 0
 
 # WiFi调参数据存储 - 前四个通道改为CCD阈值参数
 wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, speed_Kp, line_kd, speed_Kd, line_kp]
-
-# 环岛调参数据存储 (可扩展到更多通道)
-ring_wifi_data = [RING_QULU_THRESHOLD, READY_IN_RING_ENCODER, IN_RING_ENCODER, READY_OUT_RING_ANGLE]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
@@ -447,9 +429,9 @@ def ahrs_update(gx, gy, gz, ax, ay, az):
     elif imu_data_obj.Total_Yaw < 0:
         imu_data_obj.Total_Yaw += 360
     
-    # 更新环岛用的陀螺仪累积角度
-    global angle_gz
-    angle_gz = imu_data_obj.Total_Yaw
+    # 注释：简化版本不需要陀螺仪累积角度
+    # global angle_gz
+    # angle_gz = imu_data_obj.Total_Yaw
 
 def imu_init():
     global Filter_data, imu_data
@@ -752,10 +734,10 @@ def ccd_curvature_calc():
         curve = True
 
 def middle_sideline():
-    """中线计算"""
-    global Trk, ring_state, ring_left, ring_right
+    """中线计算 - 简化版本，检测到环岛时不修改中线"""
+    global Trk
     
-    # 基础中线计算
+    # 基础中线计算 - 不进行环岛修正
     Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
     Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
     
@@ -763,122 +745,48 @@ def middle_sideline():
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
     
-    # 环岛中线修正
-    if (ring_state == FIND_RING or ring_state == OUT_RING) and ring_left:
-        # 左环岛：找到环岛或出环岛时，中线偏向右边
-        Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
-    elif (ring_state == READY_IN_RING or ring_state == READY_OUT_RING) and ring_left:
-        # 左环岛：准备进入或准备出环岛时，中线偏向左边
-        Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2)
-    elif (ring_state == FIND_RING or ring_state == OUT_RING) and ring_right:
-        # 右环岛：找到环岛或出环岛时，中线偏向左边
-        Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2)
-    elif (ring_state == READY_IN_RING or ring_state == READY_OUT_RING) and ring_right:
-        # 右环岛：准备进入或准备出环岛时，中线偏向右边
-        Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
+    # 注释：检测到环岛时不修改中线，保持正常的线路跟踪
+    # 环岛的处理交给上层控制逻辑来决定
 
 def ring_detection():
-    """环岛检测状态机 - 移植自C语言示例"""
-    global ring_state, ring_left, ring_right, encoder_ring, encoder_integral
-    global angle_ring, angle_gz, CCD1_left_flag, CCD1_right_flag, black_write_1, black_write_2
-    global READY_IN_RING_ENCODER, IN_RING_ENCODER, READY_OUT_RING_ANGLE, OUT_RING_ANGLE, NO_RING_ENCODER
-    global RING_QULU_THRESHOLD, RING_QULU_EXIT_THRESHOLD
+    """环岛检测 - 简化版本，只检测环岛"""
+    global ring_state, ring_left, ring_right
+    global CCD2_left_flag, CCD2_right_flag, black_write_2
+    global RING_QULU_THRESHOLD
     
     if ring_state == NO_RING:
-        # 检测左环岛 - 使用远端CCD2检测，提前发现环岛入口
+        # 检测左环岛 - 使用远端CCD2检测
         # 左环岛特征：远端CCD左边界丢失，右边界存在，右侧曲率小
         if (not CCD2_left_flag and CCD2_right_flag and 
             Trk.right_qulu <= RING_QULU_THRESHOLD and not black_write_2):
             ring_state = FIND_RING
             ring_left = True
-            encoder_ring = encoder_integral
+            ring_right = False
             beep_short()  # 短响表示检测到环岛
             
-        # 检测右环岛 - 使用远端CCD2检测，提前发现环岛入口  
+        # 检测右环岛 - 使用远端CCD2检测  
         # 右环岛特征：远端CCD右边界丢失，左边界存在，左侧曲率小
         elif (CCD2_left_flag and not CCD2_right_flag and 
               Trk.left_qulu <= RING_QULU_THRESHOLD and not black_write_2):
             ring_state = FIND_RING
             ring_right = True
-            encoder_ring = encoder_integral
+            ring_left = False
             beep_short()  # 短响表示检测到环岛
-            
-    elif ring_state == FIND_RING:
-        if ring_left:
-            # 左环岛确认
-            if (abs(encoder_ring - encoder_integral) > READY_IN_RING_ENCODER and 
-                Trk.left_sideline2 < 27):
-                ring_state = READY_IN_RING
-                angle_gz = 0
-                angle_ring = 0
-                encoder_ring = encoder_integral
-                beep_short()  # 确认环岛
-            elif Trk.right_qulu > RING_QULU_EXIT_THRESHOLD:
-                ring_state = NO_RING
-                ring_left = False
-                beep_off()  # 取消环岛，停止响声
-                
-        if ring_right:
-            # 右环岛确认
-            if (abs(encoder_ring - encoder_integral) > READY_IN_RING_ENCODER and 
-                Trk.right_sideline2 > 100):
-                ring_state = READY_IN_RING
-                angle_gz = 0
-                angle_ring = 0
-                encoder_ring = encoder_integral
-                beep_short()  # 确认环岛
-            elif Trk.left_qulu > RING_QULU_EXIT_THRESHOLD:
-                ring_state = NO_RING
-                ring_right = False
-                beep_off()  # 取消环岛，停止响声
-                
-    elif ring_state == READY_IN_RING:
-        # 准备进入环岛
-        if abs(encoder_ring - encoder_integral) > IN_RING_ENCODER:
-            ring_state = IN_RING
-            beep_long()  # 长响表示进入环岛
-            
-    elif ring_state == IN_RING:
-        # 在环岛中，检测角度变化
-        if abs(angle_ring - angle_gz) > READY_OUT_RING_ANGLE:
-            ring_state = READY_OUT_RING
-            encoder_ring = encoder_integral
-            # 移除蜂鸣器，减少噪音干扰
-            
-    elif ring_state == READY_OUT_RING:
-        # 准备出环岛
-        if abs(angle_ring - angle_gz) > OUT_RING_ANGLE:
-            ring_state = OUT_RING
-            encoder_ring = encoder_integral
-            # 移除蜂鸣器，减少噪音干扰
-            beep_off()
-
-            
-    elif ring_state == OUT_RING:
-        # 出环岛后，等待一定距离后恢复正常
-        if abs(encoder_ring - encoder_integral) > NO_RING_ENCODER:
-            ring_state = READY_NO_RING
-            
-    elif ring_state == READY_NO_RING:
-        # 完全退出环岛状态
-        ring_state = NO_RING
-        ring_left = False
-        ring_right = False
-        angle_gz = 0
-        encoder_ring = 0
-        encoder_integral = 0
-        beep_off()  # 环岛完成，停止响声
 
 # 移除十字路口和坡道检测函数
 
 def element_detection():
     """元素检测主函数 - 只检测环岛"""
-    global encoder_integral, ring_state
-    
-    # 只有在行驶一定距离后才开始检测元素
-    if encoder_integral > 25:
-        # 只检测环岛
-        ring_detection()
+    # 只检测环岛
+    ring_detection()
+
+def clear_ring_flag():
+    """清除环岛标志位"""
+    global ring_state, ring_left, ring_right
+    ring_state = NO_RING
+    ring_left = False
+    ring_right = False
+    beep_off()  # 停止蜂鸣器
 
 def ccd_processing(ccd_data1, ccd_data2):
     """CCD主处理函数 - 移植自C语言示例"""
@@ -947,127 +855,138 @@ def calculate_dual_ccd_deviation(upper_center, lower_center):
 def ccd_process(timer):
     """CCD数据处理函数，独立定时器运行 - 使用新的算法"""
     global ccd_ticker_flag, ccd_ticker_count, line_deviation, line_control_output
+    global key
     
     ccd_ticker_flag = True
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
     
+    # 初始化CCD数据变量
+    ccd_data_upper = None
+    ccd_data_lower = None
+    
+    # 按键处理 - 放在CCD回调中
+    try:
+        key_data = key.get()
+        
+        # 检查key2短按 (按键2对应索引1)
+        if key_data[1] == 1:  # 短按
+            print("key2 = {:>6d}.".format(key_data[1]))
+            clear_ring_flag()  # 清除环岛标志位
+            key.clear(2)  # 清除按键状态
+    except:
+        pass  # 按键处理出错不影响主要功能
+    
+    # CCD数据处理
     try:
         # 读取双CCD数据 - 注意：近端ccd.get(1)，远端ccd.get(0)
         ccd_data_upper = ccd.get(0)  # 远端CCD
         ccd_data_lower = ccd.get(1)  # 近端CCD
         
-        # 检查数据有效性
-        if not ccd_data_upper and not ccd_data_lower:
-            return
-        
         # 使用新的CCD处理算法 - 参数顺序：近端，远端
-        new_deviation = ccd_processing(ccd_data_lower, ccd_data_upper)
-        
-        # 平滑过渡，避免突变
-        if abs(new_deviation - line_deviation) > 15:
-            line_deviation = line_deviation * 0.7 + new_deviation * 0.3
-        else:
-            line_deviation = new_deviation
+        if ccd_data_upper or ccd_data_lower:
+            new_deviation = ccd_processing(ccd_data_lower, ccd_data_upper)
             
+            # 平滑过渡，避免突变
+            if abs(new_deviation - line_deviation) > 15:
+                line_deviation = line_deviation * 0.7 + new_deviation * 0.3
+            else:
+                line_deviation = new_deviation
+                
             # 使用PD控制器计算线路控制输出
             line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
             
             # 限制线路控制输出
-        line_control_output = limit(line_control_output, -3000, 3000)
-            
-        # 在屏幕上显示CCD数据波形
-        try:
-            # 显示远端CCD (CCD0) 在屏幕上半部分
-            if ccd_data_upper:
-                lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
-            
-            # 显示近端CCD (CCD1) 在屏幕下半部分
-            if ccd_data_lower:
-                lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
-                
-            # 显示边界线和中线 - 使用line函数画垂直线
-            try:
-                # ===== 远端CCD (上半部分) 的边界线和中线 =====
-                # 画远端CCD左边界线 (红色)
-                if CCD2_left_flag and 0 <= Trk.left_sideline2 <= 127:
-                    lcd.line(Trk.left_sideline2, 0, Trk.left_sideline2, 24, color=0xF800, thick=2)
-                
-                # 画远端CCD右边界线 (红色)
-                if CCD2_right_flag and 0 <= Trk.right_sideline2 <= 127:
-                    lcd.line(Trk.right_sideline2, 0, Trk.right_sideline2, 24, color=0xF800, thick=2)
-                
-                # 画远端CCD中线 (绿色)
-                if 0 <= int(Trk.middle_sideline2) <= 127:
-                    lcd.line(int(Trk.middle_sideline2), 0, int(Trk.middle_sideline2), 24, color=0x07E0, thick=2)
-                
-                # ===== 近端CCD (下半部分) 的边界线和中线 =====
-                # 画近端CCD左边界线 (红色)
-                if CCD1_left_flag and 0 <= Trk.left_sideline1 <= 127:
-                    lcd.line(Trk.left_sideline1, 96, Trk.left_sideline1, 120, color=0xF800, thick=2)
-                
-                # 画近端CCD右边界线 (红色)
-                if CCD1_right_flag and 0 <= Trk.right_sideline1 <= 127:
-                    lcd.line(Trk.right_sideline1, 96, Trk.right_sideline1, 120, color=0xF800, thick=2)
-                
-                # 画近端CCD中线 (绿色)
-                if 0 <= int(Trk.middle_sideline1) <= 127:
-                    lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
-                
-                # 第1行：近端边界位置
-                lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
-                
-                # 第2行：远端边界位置和偏差
-                lcd.str12(0, 207, f"L2:{Trk.left_sideline2:3d} R2:{Trk.right_sideline2:3d} Dev:{line_deviation:4.1f}", 0xFFFF)
-                
-                # 第3行：两侧曲率 (重点显示)
-                lcd.str12(0, 219, f"QL:{Trk.left_qulu:5.1f} QR:{Trk.right_qulu:5.1f}", 0x07FF)
-                
-                # 第4行：CCD1边界检测状态 (重点显示)
-                ccd1_status = ""
-                ccd1_status += "L1:" + ("Y" if CCD1_left_flag else "N")
-                ccd1_status += " R1:" + ("Y" if CCD1_right_flag else "N")
-                lcd.str12(0, 231, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
-                
-                # 第5行：CCD2边界检测状态
-                ccd2_status = ""
-                ccd2_status += "L2:" + ("Y" if CCD2_left_flag else "N")
-                ccd2_status += " R2:" + ("Y" if CCD2_right_flag else "N")
-                lcd.str12(0, 243, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
-                
-                # 第6行：黑白场景检测 (重点显示)
-                black_status = ""
-                black_status += "B1:" + ("Y" if black_write_1 else "N")
-                black_status += " B2:" + ("Y" if black_write_2 else "N")
-                lcd.str12(0, 255, f"Black {black_status}", 0xFFE0)  # 黄色
-                
-                # 第7行：环岛状态
-                ring_status = ""
-                if ring_state == NO_RING: ring_status = "NoRing"
-                elif ring_state == FIND_RING: ring_status = "Find"
-                elif ring_state == READY_IN_RING: ring_status = "ReadyIn"
-                elif ring_state == IN_RING: ring_status = "InRing"
-                elif ring_state == READY_OUT_RING: ring_status = "ReadyOut"
-                elif ring_state == OUT_RING: ring_status = "OutRing"
-                elif ring_state == READY_NO_RING: ring_status = "ReadyNo"
-                
-                ring_dir = ""
-                if ring_left: ring_dir = "L"
-                elif ring_right: ring_dir = "R"
-                
-                lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir}", 0xF800)  # 红色
-                
-                # 第8行：系统状态
-                lcd.str12(0, 279, f"System:Running", 0x07E0)  # 绿色
-                
-            except:
-                pass
-                
-        except:
-            pass  # 显示出错不影响主要功能
+            line_control_output = limit(line_control_output, -3000, 3000)
             
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
         line_control_output *= 0.9
+    
+    # 显示屏更新 - 独立于CCD数据处理，确保始终更新
+    try:
+        # 显示远端CCD (CCD0) 在屏幕上半部分
+        if ccd_data_upper:
+            lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
+        
+        # 显示近端CCD (CCD1) 在屏幕下半部分
+        if ccd_data_lower:
+            lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
+            
+        # 显示边界线和中线 - 使用line函数画垂直线
+        # ===== 远端CCD (上半部分) 的边界线和中线 =====
+        # 画远端CCD左边界线 (红色)
+        if CCD2_left_flag and 0 <= Trk.left_sideline2 <= 127:
+            lcd.line(Trk.left_sideline2, 0, Trk.left_sideline2, 24, color=0xF800, thick=2)
+        
+        # 画远端CCD右边界线 (红色)
+        if CCD2_right_flag and 0 <= Trk.right_sideline2 <= 127:
+            lcd.line(Trk.right_sideline2, 0, Trk.right_sideline2, 24, color=0xF800, thick=2)
+        
+        # 画远端CCD中线 (绿色)
+        if 0 <= int(Trk.middle_sideline2) <= 127:
+            lcd.line(int(Trk.middle_sideline2), 0, int(Trk.middle_sideline2), 24, color=0x07E0, thick=2)
+        
+        # ===== 近端CCD (下半部分) 的边界线和中线 =====
+        # 画近端CCD左边界线 (红色)
+        if CCD1_left_flag and 0 <= Trk.left_sideline1 <= 127:
+            lcd.line(Trk.left_sideline1, 96, Trk.left_sideline1, 120, color=0xF800, thick=2)
+        
+        # 画近端CCD右边界线 (红色)
+        if CCD1_right_flag and 0 <= Trk.right_sideline1 <= 127:
+            lcd.line(Trk.right_sideline1, 96, Trk.right_sideline1, 120, color=0xF800, thick=2)
+        
+        # 画近端CCD中线 (绿色)
+        if 0 <= int(Trk.middle_sideline1) <= 127:
+            lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
+        
+        # 第1行：近端边界位置
+        lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
+        
+        # 第2行：远端边界位置和偏差
+        lcd.str12(0, 207, f"L2:{Trk.left_sideline2:3d} R2:{Trk.right_sideline2:3d} Dev:{line_deviation:4.1f}", 0xFFFF)
+        
+        # 第3行：两侧曲率 (重点显示)
+        lcd.str12(0, 219, f"QL:{Trk.left_qulu:5.1f} QR:{Trk.right_qulu:5.1f}", 0x07FF)
+        
+        # 第4行：CCD1边界检测状态 (重点显示)
+        ccd1_status = ""
+        ccd1_status += "L1:" + ("Y" if CCD1_left_flag else "N")
+        ccd1_status += " R1:" + ("Y" if CCD1_right_flag else "N")
+        lcd.str12(0, 231, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
+        
+        # 第5行：CCD2边界检测状态
+        ccd2_status = ""
+        ccd2_status += "L2:" + ("Y" if CCD2_left_flag else "N")
+        ccd2_status += " R2:" + ("Y" if CCD2_right_flag else "N")
+        lcd.str12(0, 243, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
+        
+        # 第6行：黑白场景检测 (重点显示)
+        black_status = ""
+        black_status += "B1:" + ("Y" if black_write_1 else "N")
+        black_status += " B2:" + ("Y" if black_write_2 else "N")
+        lcd.str12(0, 255, f"Black {black_status}", 0xFFE0)  # 黄色
+        
+        # 第7行：环岛状态 - 始终显示，不管环岛状态如何
+        ring_status = ""
+        if ring_state == NO_RING: ring_status = "NoRing"
+        elif ring_state == FIND_RING: ring_status = "Find"
+        
+        ring_dir = ""
+        if ring_left: ring_dir = "L"
+        elif ring_right: ring_dir = "R"
+        
+        lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir} Key2:Clear", 0xF800)  # 红色
+        
+        # 第8行：系统状态 - 始终显示
+        lcd.str12(0, 279, f"System:Running Threshold:{RING_QULU_THRESHOLD}", 0x07E0)  # 绿色
+        
+    except:
+        # 显示出错也要尝试显示基本信息
+        try:
+            lcd.str12(0, 267, f"Ring:ERROR Key2:Clear", 0xF800)
+            lcd.str12(0, 279, f"System:Display Error", 0xF800)
+        except:
+            pass
 
 # 初始化定时器
 pit1 = ticker(1)
@@ -1075,7 +994,7 @@ pit3 = ticker(3)
 pit2 = ticker(2)  # CCD处理定时器
 pit1.capture_list(imu)
 pit3.capture_list(encoder_l, encoder_r)
-pit2.capture_list(ccd)  # CCD定时器捕获CCD
+pit2.capture_list(ccd, key)  # CCD定时器捕获CCD和按键
 pit1.callback(control_loop)
 pit3.callback(encoder_update)
 pit2.callback(ccd_process)  # CCD处理回调
@@ -1108,6 +1027,3 @@ while True:
         break
     
     gc.collect()
-
-
-
