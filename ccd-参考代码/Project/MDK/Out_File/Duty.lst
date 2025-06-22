@@ -1,0 +1,63 @@
+C251 COMPILER V5.60.0,  Duty                                                               21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Duty
+OBJECT MODULE PLACED IN .\Out_File\Duty.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\Duty.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCDIR(
+                    -..\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;..\
+                    -USER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\Duty.lst) TABS(2) OBJECT(.\Out_File\Duty.obj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          uint16 duty_pwm=0,duty_pwm_left=0,duty_pwm_right=0;
+    4          uint8 duty_pwm_flag=0;
+    5          uint16 duty_pwm_error=0;
+    6          uint16 duty_pwm_stop=0;
+    7          void Duct_init()
+    8          {
+    9   1        pwm_init(PWMB_CH1_P00,300,0); //ÓÒ
+   10   1        pwm_init(PWMB_CH2_P01,300,0); //×ó
+   11   1      }
+   12          void Duct_start()
+   13          {
+   14   1        pwm_duty(PWMB_CH1_P00,duty_pwm); //ÓÒ
+   15   1        pwm_duty(PWMB_CH2_P01,duty_pwm); //×ó
+   16   1        duty_pwm_stop=duty_pwm;
+   17   1        duty_pwm_flag=1;
+   18   1      }
+   19          void Duct_stop()
+   20          {
+   21   1        if(duty_pwm_stop>0)
+   22   1        {
+   23   2          duty_pwm_stop-=50;
+   24   2        }
+   25   1        else duty_pwm_stop=0;
+   26   1        pwm_duty(PWMB_CH1_P00,duty_pwm_stop); //ÓÒ
+   27   1        pwm_duty(PWMB_CH2_P01,duty_pwm_stop); //×ó
+   28   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       135     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        11     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        35     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,65 @@
+C251 COMPILER V5.60.0,  encoder                                                            21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE encoder
+OBJECT MODULE PLACED IN .\Out_File\encoder.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\encoder.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCD
+                    -IR(..\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;
+                    -..\USER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\encoder.lst) TABS(2) OBJECT(.\Out_File\encoder.o
+                    -bj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          int encoder_L=0,encoder_R=0;
+    4          float encoder_integral=0,encoder=0,encoder_integra2=0;
+    5          /*******************************************
+    6          *************编码器计数函数*****************
+    7          *******************************************/
+    8          void EncoderCount(void)
+    9          {
+   10   1           //读取采集到的编码器脉冲数
+   11   1          encoder_L = ctimer_count_read(SPEEDL_PLUSE);
+   12   1          encoder_R = ctimer_count_read(SPEEDR_PLUSE);
+   13   1           //计数器清零
+   14   1          ctimer_count_clean(SPEEDL_PLUSE);
+   15   1          ctimer_count_clean(SPEEDR_PLUSE);
+   16   1          //采集方向信息
+   17   1          if(1 == SPEEDL_DIR)    
+   18   1          {
+   19   2            encoder_L = -encoder_L;
+   20   2          }
+   21   1      
+   22   1          if(1 == SPEEDR_DIR)    
+   23   1          {
+   24   2            encoder_R = -encoder_R;
+   25   2          }
+   26   1          encoder=(encoder_L+encoder_R)*0.5;
+   27   1          encoder_integral=encoder_integral+encoder*0.02; 
+   28   1          encoder_integra2=encoder_integra2+encoder*0.02; 
+   29   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       163     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        16     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        36     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

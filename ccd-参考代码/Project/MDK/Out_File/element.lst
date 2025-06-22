@@ -1,0 +1,439 @@
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE element
+OBJECT MODULE PLACED IN .\Out_File\element.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\element.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCD
+                    -IR(..\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;
+                    -..\USER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\element.lst) TABS(2) OBJECT(.\Out_File\element.o
+                    -bj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          uint8 Ring_50=0;//降速
+    4          uint8 Ring_60=0;//跟70环参数一样
+    5          uint8 Ring_90=0;//应该可以跟80环一样
+    6          
+    7          int8 Ring_num=0;
+    8          int8 Ring_flag[4]={0};
+    9          int8 Ring_open_flag[4]={0};
+   10          int8 Ring_stop=0;
+   11          
+   12          void Ring_all()
+   13          {
+   14   1        if(Ring_num>0 && Ring_open_flag[0]!=1)
+   15   1        {
+   16   2          if(Ring_flag[0]==1) {Ring_50=1;Ring_60=0;Ring_90=0;}
+   17   2          if(Ring_flag[0]==2) {Ring_50=0;Ring_60=1;Ring_90=0;}
+   18   2          if(Ring_flag[0]==3) {Ring_50=0;Ring_60=0;Ring_90=1;}
+   19   2          if(Ring_stop==1)
+   20   2          {
+   21   3            Ring_stop=0;
+   22   3            Ring_open_flag[0]=1;
+   23   3          }
+   24   2        }
+   25   1        if(Ring_num>1 && Ring_open_flag[1]!=1 &&  Ring_open_flag[0]==1)
+   26   1        {
+   27   2          if(Ring_flag[1]==1) {Ring_50=1;Ring_60=0;Ring_90=0;}
+   28   2          if(Ring_flag[1]==2) {Ring_50=0;Ring_60=1;Ring_90=0;}
+   29   2          if(Ring_flag[1]==3) {Ring_50=0;Ring_60=0;Ring_90=1;}
+   30   2          if(Ring_stop==1)
+   31   2          {
+   32   3            Ring_stop=0;
+   33   3            Ring_open_flag[1]=1;
+   34   3          }
+   35   2        }
+   36   1        if(Ring_num>2 && Ring_open_flag[2]!=1 &&  Ring_open_flag[1]==1)
+   37   1        {
+   38   2          if(Ring_flag[2]==1) {Ring_50=1;Ring_60=0;Ring_90=0;}
+   39   2          if(Ring_flag[2]==2) {Ring_50=0;Ring_60=1;Ring_90=0;}
+   40   2          if(Ring_flag[2]==3) {Ring_50=0;Ring_60=0;Ring_90=1;}
+   41   2          if(Ring_stop==1)
+   42   2          {
+   43   3            Ring_stop=0;
+   44   3            Ring_open_flag[2]=1;
+   45   3          }
+   46   2        }
+   47   1        if(Ring_num>3 && Ring_open_flag[3]!=1 &&  Ring_open_flag[2]==1)
+   48   1        {
+   49   2          if(Ring_flag[3]==1) {Ring_50=1;Ring_60=0;Ring_90=0;}
+   50   2          if(Ring_flag[3]==2) {Ring_50=0;Ring_60=1;Ring_90=0;}
+   51   2          if(Ring_flag[3]==3) {Ring_50=0;Ring_60=0;Ring_90=1;}
+   52   2          if(Ring_stop==1)
+   53   2          {
+   54   3            Ring_stop=0;
+   55   3            Ring_open_flag[3]=1;
+   56   3          }
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 2   
+
+   57   2        }
+   58   1        if(Ring_num>4 && Ring_open_flag[4]!=1 &&  Ring_open_flag[3]==1)
+   59   1        {
+   60   2          if(Ring_flag[4]==1) {Ring_50=1;Ring_60=0;Ring_90=0;}
+   61   2          if(Ring_flag[4]==2) {Ring_50=0;Ring_60=1;Ring_90=0;}
+   62   2          if(Ring_flag[4]==3) {Ring_50=0;Ring_60=0;Ring_90=1;}
+   63   2          if(Ring_stop==1)
+   64   2          {
+   65   3            Ring_stop=0;
+   66   3            Ring_open_flag[4]=1;
+   67   3          }
+   68   2        }
+   69   1      }
+   70          
+   71          uint8 Ring_state=0;
+   72          uint16 encoder_Ring=0;
+   73          uint16 Angle_Ring=0;
+   74          
+   75          uint8 Ring_left=0;
+   76          uint8 Ring_right=0;
+   77          
+   78          //ui
+   79          uint8 Find_Ring_qulv=0;
+   80          uint8 Fing_Ring_sideline=0;
+   81          
+   82          uint8 Ready_In_Ring_encoder=0;
+   83          uint8 Ready_In_Ring_sideline=0;
+   84          
+   85          uint8 In_Ring_encoder=0;
+   86          int16 Ready_Out_Ring_angle=0;
+   87          int16 Out_Ring_angle=0;
+   88          uint8 No_Ring_encoder=0;
+   89          
+   90          void Ring()
+   91          {
+   92   1        switch(Ring_state)
+   93   1        {
+   94   2          case No_Ring: //做防误判弯道
+   95   2            if(CCD1_left_flag==0 && CCD1_right_flag==1 && Trk.right_qulu<=12 && black_write_2==0)
+   96   2            {
+   97   3              Ring_state=Find_Ring;
+   98   3              Ring_left=1;
+   99   3              beep_on();
+  100   3              encoder_integral=100;
+  101   3              encoder_Ring=encoder_integral;
+  102   3            }
+  103   2            if(CCD1_left_flag==1 && CCD1_right_flag==0 && Trk.left_qulu<=12 && black_write_2==0)
+  104   2            {
+  105   3              Ring_state=Find_Ring;
+  106   3              Ring_right=1;
+  107   3              beep_on();
+  108   3              encoder_integral=100;
+  109   3              encoder_Ring=encoder_integral;
+  110   3            }
+  111   2      
+  112   2            if((Ring_left==1 || Ring_right==1) && CCD1_left_flag==0 && CCD1_right_flag==0 && black_write_2==0 && b
+             -lack_write_1==0)
+  113   2            {
+  114   3              Ring_state=No_Ring;
+  115   3              Ring_left=0;
+  116   3              Ring_right=0;
+  117   3              Cross_flag=1;
+  118   3              Ramp_flag=0;
+  119   3              beep_on();
+  120   3              encoder_integral=100;
+  121   3              encoder_cross=encoder_integral;
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 3   
+
+  122   3            }
+  123   2            break;
+  124   2          case Find_Ring:
+  125   2              if(Ring_left==1)
+  126   2              {
+  127   3                if(abs(encoder_Ring-encoder_integral)>Ready_In_Ring_encoder && Trk.left_sideline2<27)
+  128   3                {
+  129   4                  Ring_state=Ready_In_Ring;
+  130   4                  beep_on();
+  131   4                  Angle_gz=0;
+  132   4                  Angle_Ring=0;
+  133   4                  if(Ring_50==1)Ring_Speed=1;
+  134   4                  if(Ring_60==1)Ring_Speed=2;
+  135   4                  if(Ring_90==1)Ring_Speed=3;
+  136   4                  encoder_Ring=encoder_integral;
+  137   4                }
+  138   3                else if(Trk.right_qulu>30)
+  139   3                {
+  140   4                  Ring_state=No_Ring;
+  141   4                  beep_off();
+  142   4                  Ring_left=0;
+  143   4                }
+  144   3              }
+  145   2              
+  146   2              if(Ring_right==1)
+  147   2              {
+  148   3                if(abs(encoder_Ring-encoder_integral)>Ready_In_Ring_encoder && Trk.right_sideline2>100)
+  149   3                {
+  150   4                  Ring_state=Ready_In_Ring;
+  151   4                  beep_on();
+  152   4                  Angle_gz=0;
+  153   4                  Angle_Ring=0;
+  154   4                  if(Ring_50==1)Ring_Speed=1;
+  155   4                  if(Ring_60==1)Ring_Speed=2;
+  156   4                  if(Ring_90==1)Ring_Speed=3;
+  157   4                  encoder_Ring=encoder_integral;
+  158   4                }
+  159   3                else if(Trk.left_qulu>30)
+  160   3                {
+  161   4                  Ring_state=No_Ring;
+  162   4                  Ring_right=0;
+  163   4                  beep_off();
+  164   4                }
+  165   3              }
+  166   2              
+  167   2            break;
+  168   2          case Ready_In_Ring:
+  169   2            if(Ring_left==1 && abs(encoder_Ring-encoder_integral)>In_Ring_encoder)
+  170   2            {
+  171   3              Ring_state=In_Ring; //准备分大小环pd与速度
+  172   3              if(Ring_50==1)
+  173   3              {
+  174   4                Ring_Speed=11;
+  175   4                Pid_Ring_flag=1;
+  176   4              }
+  177   3              if(Ring_60==1)
+  178   3              {
+  179   4                Ring_Speed=21;
+  180   4                Pid_Ring_flag=2;
+  181   4              }
+  182   3              if(Ring_90==1)
+  183   3              {
+  184   4                Ring_Speed=31;
+  185   4                Pid_Ring_flag=3;
+  186   4              }
+  187   3            }
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 4   
+
+  188   2            
+  189   2            if(Ring_right==1 && abs(encoder_Ring-encoder_integral)>In_Ring_encoder)
+  190   2            {
+  191   3              Ring_state=In_Ring; //准备分大小环pd与速度
+  192   3              if(Ring_50==1)
+  193   3              {
+  194   4                Ring_Speed=11;
+  195   4                Pid_Ring_flag=1;
+  196   4              }
+  197   3              if(Ring_60==1)
+  198   3              {
+  199   4                Ring_Speed=21;
+  200   4                Pid_Ring_flag=2;
+  201   4              }
+  202   3              if(Ring_90==1)
+  203   3              {
+  204   4                Ring_Speed=31;
+  205   4                Pid_Ring_flag=3;
+  206   4              }
+  207   3            }
+  208   2            break;
+  209   2          case In_Ring:
+  210   2            if(abs(Angle_Ring-Angle_gz)>Ready_Out_Ring_angle && Ring_left==1)
+  211   2            {
+  212   3              Ring_state=Ready_Out_Ring;
+  213   3              if(Ring_50==1){Ring_Speed=12;}
+  214   3              if(Ring_60==1){Ring_Speed=22;}
+  215   3              if(Ring_90==1){Ring_Speed=32;}
+  216   3              encoder_Ring=encoder_integral;
+  217   3            }
+  218   2      
+  219   2            if(abs(Angle_Ring-Angle_gz)>Ready_Out_Ring_angle && Ring_right==1)
+  220   2            {
+  221   3              Ring_state=Ready_Out_Ring;
+  222   3              if(Ring_50==1){Ring_Speed=12;}
+  223   3              if(Ring_60==1){Ring_Speed=22;}
+  224   3              if(Ring_90==1){Ring_Speed=32;}
+  225   3              encoder_Ring=encoder_integral;
+  226   3            }
+  227   2      
+  228   2            break;
+  229   2          case Ready_Out_Ring:
+  230   2            if(Ring_left==1)
+  231   2            {
+  232   3              if(abs(Angle_Ring-Angle_gz)>Out_Ring_angle)
+  233   3              {
+  234   4                Ring_state=Out_Ring;
+  235   4                Ring_Speed=0;
+  236   4                Pid_Ring_flag=0;
+  237   4                encoder_Ring=encoder_integral;
+  238   4              }
+  239   3            }
+  240   2            if(Ring_right==1)
+  241   2            {
+  242   3              if(abs(Angle_Ring-Angle_gz)>Out_Ring_angle)
+  243   3              {
+  244   4                Ring_state=Out_Ring;
+  245   4                Ring_Speed=0;
+  246   4                Pid_Ring_flag=0;
+  247   4                encoder_Ring=encoder_integral;
+  248   4              }
+  249   3            }
+  250   2            break;
+  251   2          case Out_Ring:
+  252   2            if(Ring_left==1)
+  253   2            {
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 5   
+
+  254   3              if(abs(encoder_Ring-encoder_integral)>No_Ring_encoder)// || Trk.left_qulu<8 || Trk.right_qulu<8
+  255   3              {
+  256   4                Ring_state=Ready_No_Ring;
+  257   4              }
+  258   3            }
+  259   2            if(Ring_right==1)
+  260   2            {
+  261   3              if(abs(encoder_Ring-encoder_integral)>No_Ring_encoder)
+  262   3              {
+  263   4                Ring_state=Ready_No_Ring;
+  264   4              }
+  265   3            }
+  266   2            break;      
+  267   2          case Ready_No_Ring:
+  268   2            Ring_stop=1;
+  269   2            Ring_left=0;
+  270   2            Ring_right=0;
+  271   2            Angle_gz=0;
+  272   2            encoder_Ring=0;
+  273   2            encoder_integral=0;
+  274   2            beep_off();
+  275   2            Ring_Speed=0;
+  276   2            Pid_Ring_flag=0;
+  277   2            Ring_state=No_Ring;
+  278   2          break;
+  279   2        }
+  280   1      }
+  281          
+  282          uint8 Ramp_flag=0;
+  283          uint16 encoder_ramp=0;
+  284          
+  285          //ui
+  286          uint8 Find_Ramp_dis=0;
+  287          uint8 Find_Ramp_width1=0;
+  288          uint8 Find_Ramp_width2=0;
+  289          uint8 Find_Ramp_qulv=0;
+  290          uint8 Up_Ramp_encoder=0;
+  291          uint8 Out_Ramp_encoder=0;
+  292          
+  293          void Ramp()
+  294          {
+  295   1        //发现坡道、上坡降速
+  296   1        if(Ramp_flag==0 && Trk.Width1>Find_Ramp_width1 && Trk.Width2>Find_Ramp_width2 && Trk.right_qulu<Find_Ram
+             -p_qulv && Trk.left_qulu<Find_Ramp_qulv && distance<=Find_Ramp_dis
+  297   1          && CCD1_left_flag==1 && CCD1_right_flag==1 && CCD2_left_flag==1 && CCD2_right_flag==1 && black_write_2=
+             -=0 && black_write_1==0)
+  298   1        {
+  299   2          Ramp_flag=1;
+  300   2          beep_on();
+  301   2          encoder_integral=100;
+  302   2          encoder_ramp=encoder_integral;
+  303   2        }
+  304   1        //上坡到下坡
+  305   1        if(Ramp_flag==1 && abs(encoder_ramp-encoder_integral)>Up_Ramp_encoder)
+  306   1        {
+  307   2          Ramp_flag=2;
+  308   2          encoder_ramp=encoder_integral;
+  309   2        }
+  310   1        //下坡 出坡 清标志位
+  311   1        if(Ramp_flag==2 && abs(encoder_ramp-encoder_integral)>Out_Ramp_encoder)
+  312   1        {
+  313   2          Ramp_flag=0;
+  314   2          encoder_ramp=0;
+  315   2          encoder_integral=0;
+  316   2          beep_off();
+  317   2        } 
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 6   
+
+  318   1      }
+  319          
+  320          uint8 Cross_flag=0;
+  321          uint16 encoder_cross=0;
+  322          
+  323          //ui
+  324          uint8 Cross_encoder=0;
+  325          
+  326          void Cross()
+  327          {
+  328   1        if(Cross_flag==0 && CCD1_left_flag==0 && CCD1_right_flag==0 && black_write_1==0 && black_write_2==0)
+  329   1        {
+  330   2          Cross_flag=1;
+  331   2          beep_on();
+  332   2          encoder_integral=100;
+  333   2          encoder_cross=encoder_integral;
+  334   2        }
+  335   1        if(Cross_flag==1 && abs(encoder_cross-encoder_integral)>Cross_encoder)
+  336   1        {
+  337   2          Cross_flag=0;
+  338   2          beep_off();
+  339   2          encoder_integral=0;
+  340   2          encoder_cross=0;
+  341   2        }
+  342   1      }
+  343          
+  344          uint8 zebra_1=0;
+  345          uint8 Zebra_flag=0;
+  346          uint16 Zebra_encoder=0;
+  347          
+  348          //ui
+  349          uint8 Out_Zebra_encoder=0;
+  350          void Zebra()
+  351          {
+  352   1        //z+ebra_1=0;
+  353   1        for(i=Trk.left_sideline1+5;i<=Trk.right_sideline1-5;i++)
+  354   1        {
+  355   2          if((uint32)(abs(ccd_data_ch1[i]-ccd_data_ch1[i+3])*100)/(ccd_data_ch1[i]+ccd_data_ch1[i+3])>CCD1.thresh
+             -old)
+  356   2          {
+  357   3            zebra_1++;
+  358   3          }
+  359   2        } 
+  360   1        
+  361   1        if(zebra_1>=8 && Zebra_flag==0)
+  362   1        {
+  363   2          Zebra_flag=1;
+  364   2          encoder_integra2=500;
+  365   2          Zebra_encoder=encoder_integra2;
+  366   2        }
+  367   1        else if(zebra_1<8)
+  368   1        {zebra_1=0;}
+  369   1        
+  370   1        if(Zebra_flag==1 && abs(Zebra_encoder-encoder_integra2)>Out_Zebra_encoder)
+  371   1        {
+  372   2          Zebra_flag=2;
+  373   2          beep_on();
+  374   2        }
+  375   1      } 
+  376          
+  377          void element()
+  378          { 
+  379   1        if(Cross_flag==0 && Ramp_flag==0)
+  380   1        {
+  381   2          Ring_all();
+  382   2          Ring();
+C251 COMPILER V5.60.0,  element                                                            21/08/24  21:41:51  PAGE 7   
+
+  383   2        }
+  384   1        if(Cross_flag==0 &&Ring_state==0)Ramp();
+  385   1        if(Ramp_flag==0 && Ring_state==0)Cross();
+  386   1      
+  387   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      2732     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        48     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       188     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

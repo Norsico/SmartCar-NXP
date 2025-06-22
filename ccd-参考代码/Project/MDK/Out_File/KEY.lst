@@ -1,0 +1,813 @@
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE KEY
+OBJECT MODULE PLACED IN .\Out_File\KEY.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\KEY.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCDIR(.
+                    -.\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;..\U
+                    -SER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\KEY.lst) TABS(2) OBJECT(.\Out_File\KEY.obj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          
+    4          //开关标志位
+    5          uint8 key1_flag;
+    6          uint8 key2_flag;
+    7          uint8 key3_flag;
+    8          uint8 key4_flag;
+    9          uint8 key5_flag;
+   10          uint8 key6_flag;
+   11          
+   12          uint8 Model=1;          //光标上下移动标志位
+   13          uint8 grade_flag=0;     //确认标志位
+   14          uint8 ips114_show_flag=0; //二级菜单标志
+   15          uint8 lose=0;           //减
+   16          uint8 plus=0;           //加
+   17          uint8 return_flag=0;    //返回
+   18          
+   19          uint8 Augle_flag=0; //二级菜单标志
+   20          
+   21          uint8 key_flag=0;
+   22          uint8 data_buff[85]={0};
+   23          
+   24          uint8 ips114_show_element_flag=0;
+   25          uint8 ips114_show_ring_flag=0;
+   26          void key(void)
+   27          {
+   28   1          //开关状态变量
+   29   1        static uint8 key1_status = 1;
+   30   1        static uint8 key2_status = 1;
+   31   1        static uint8 key3_status = 1;
+   32   1        static uint8 key4_status = 1;
+   33   1        static uint8 key5_status = 1;
+   34   1        static uint8 key6_status = 1;
+   35   1        //上一次开关状态变量
+   36   1        static uint8 key1_last_status;
+   37   1        static uint8 key2_last_status;
+   38   1        static uint8 key3_last_status;
+   39   1        static uint8 key4_last_status;
+   40   1        static uint8 key5_last_status;
+   41   1        static uint8 key6_last_status;
+   42   1        //使用此方法优点在于，不需要使用while(1) 等待，避免处理器资源浪费
+   43   1        //保存按键状态
+   44   1        key1_last_status = key1_status;
+   45   1        key2_last_status = key2_status;
+   46   1        key3_last_status = key3_status;
+   47   1        key4_last_status = key4_status;
+   48   1        key5_last_status = key5_status;
+   49   1        key6_last_status = key6_status;
+   50   1        //读取当前按键状态
+   51   1        key1_status = KEY1_PIN;
+   52   1        key2_status = KEY2_PIN;
+   53   1        key3_status = KEY3_PIN;
+   54   1        key4_status = KEY4_PIN;
+   55   1        key5_status = KEY5_PIN;
+   56   1        key6_status = KEY6_PIN;
+   57   1        //检测到按键按下之后  并放开置位标志位
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 2   
+
+   58   1        if(key1_status && !key1_last_status)    key1_flag = 1;//返回
+   59   1        if(key2_status && !key2_last_status)    key2_flag = 1;//上
+   60   1        if(key3_status && !key3_last_status)    key3_flag = 1;//下
+   61   1        if(key4_status && !key4_last_status)    key4_flag = 1;//左
+   62   1        if(key5_status && !key5_last_status)    key5_flag = 1;//右
+   63   1        if(key6_status && !key6_last_status)    key6_flag = 1;//确认
+   64   1        //标志位置位之后，可以使用标志位执行自己想要做的事件
+   65   1        if(key1_flag==1)   
+   66   1        {
+   67   2          key1_flag = 0;//使用按键之后，应该清除标志位
+   68   2          return_flag=1;//返回  
+   69   2        }
+   70   1        if(key2_flag==1)   
+   71   1        {
+   72   2          key2_flag = 0;//使用按键之后，应该清除标志位
+   73   2          Model--;  //光标--
+   74   2        }
+   75   1        if(key3_flag==1)   
+   76   1        {
+   77   2          key3_flag = 0;//使用按键之后，应该清除标志位
+   78   2          Model++;  //光标++
+   79   2        }
+   80   1        if(key4_flag==1)   
+   81   1        {
+   82   2          key4_flag = 0;//使用按键之后，应该清除标志位
+   83   2          lose++;  //减
+   84   2        }
+   85   1        if(key5_flag==1)   
+   86   1        {
+   87   2          key5_flag = 0;//使用按键之后，应该清除标志位
+   88   2          plus++;   //加
+   89   2        }
+   90   1        if(key6_flag==1)   
+   91   1        {
+   92   2          key6_flag = 0;//使用按键之后，应该清除标志位
+   93   2          grade_flag++; //确定
+   94   2        }
+   95   1      }
+   96          void ParameterExchange(void)
+   97          {
+   98   1      /******************光标******************/  
+   99   1        ips114_showstr(0,Model - 1,">");
+  100   1        ips114_showstr(0,(Model + 14) % 16," ");
+  101   1        ips114_showstr(0,Model == 16 ? 1 : Model," ");
+  102   1        
+  103   1        if(grade_flag==1)                  
+  104   1        {
+  105   2          switch(Model)
+  106   2          {
+  107   3            case 1: ips114_show_flag=100;grade_flag=2; Model=0; cls_flag=0;Duct_start();    break; //发车标志位 ;
+  108   3            case 2: ips114_show_flag=1; grade_flag=2; Model=0; cls_flag=0;   break;
+  109   3            case 3: ips114_show_flag=2; grade_flag=2; Model=0; cls_flag=0;   break;
+  110   3            case 4: ips114_show_flag=3; grade_flag=2; Model=0; cls_flag=0;   break;
+  111   3            default:Model=1;break;
+  112   3          }
+  113   2        }
+  114   1        if(ips114_show_flag==100)
+  115   1        {
+  116   2          if(grade_flag==3)
+  117   2          {
+  118   3            start1=1;
+  119   3            Augle_flag=1;
+  120   3            key_flag=~key_flag;
+  121   3          }
+  122   2          if(return_flag==1) //返回
+  123   2          {
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 3   
+
+  124   3            return_flag=0;
+  125   3            Model=1;
+  126   3            cls_flag=0;
+  127   3            ips114_show_flag=0;
+  128   3            grade_flag=0;
+  129   3          }
+  130   2        }
+  131   1        if(ips114_show_flag==1)
+  132   1        {
+  133   2          if(plus==1)
+  134   2          {
+  135   3            switch(Model)
+  136   3            {
+  137   4              case 1: Pid_Kp        +=10; break; 
+  138   4              case 2: Pid_Kd        +=100; break;
+  139   4              case 3: Motor_Pid_speed_Z   +=5;    
+  140   4                    if(Motor_Pid_speed_Z==180)
+  141   4                    {
+  142   5                      Pid_Kp=1500;
+  143   5                      Pid_Kd=2000;
+  144   5                      Motor_Pid_Dif_P=4;
+  145   5                      duty_pwm=4000;
+  146   5                    }
+  147   4                    if(Motor_Pid_speed_Z==200)
+  148   4                    {
+  149   5                      Pid_Kp=1500;
+  150   5                      Pid_Kd=3000;
+  151   5                      Motor_Pid_Dif_P=6;
+  152   5                      duty_pwm=4500;
+  153   5                    }
+  154   4                    if(Motor_Pid_speed_Z==220)
+  155   4                    {
+  156   5                      Pid_Kp=1500;
+  157   5                      Pid_Kd=4200;
+  158   5                      Motor_Pid_Dif_P=5;
+  159   5                      duty_pwm=5000;
+  160   5                    }
+  161   4                    if(Motor_Pid_speed_Z==230)
+  162   4                    {
+  163   5                      Pid_Kp=1550;
+  164   5                      Pid_Kd=6200;
+  165   5                      Motor_Pid_Dif_P=7;
+  166   5                      duty_pwm=5100;
+  167   5                    }
+  168   4                    if(Motor_Pid_speed_Z==250)
+  169   4                    {
+  170   5                      Pid_Kp=1700;
+  171   5                      Pid_Kd=6800;
+  172   5                      Motor_Pid_Dif_P=9;
+  173   5                      duty_pwm=5600;
+  174   5                    }
+  175   4                    if(Motor_Pid_speed_Z==260)
+  176   4                    {
+  177   5                      Pid_Kp=1800;
+  178   5                      Pid_Kd=9000;
+  179   5                      Motor_Pid_Dif_P=12;
+  180   5                      duty_pwm=5900;
+  181   5                    }
+  182   4              break; 
+  183   4              case 4: Motor_Pid_Dif_P     +=1;     break;
+  184   4              case 5: duty_pwm            +=100; break;
+  185   4              case 6: duty_pwm_error      +=100; break;
+  186   4              
+  187   4              case 7: Linear_speed        +=5; break; 
+  188   4              case 8: Curve_speed         +=5; break; 
+  189   4              
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 4   
+
+  190   4              case 9: Motor_Pid_Z_L_Ki    +=10; break;
+  191   4              case 10: Motor_Pid_Z_L_Kp   +=10; break;
+  192   4              case 11: Motor_Pid_Z_R_Ki   +=10; break;
+  193   4              case 12: Motor_Pid_Z_R_Kp   +=10; break;
+  194   4      
+  195   4            }
+  196   3            EepromWrite();
+  197   3          }
+  198   2          if(lose==1)
+  199   2          {
+  200   3            switch(Model)
+  201   3            {
+  202   4              case 1: Pid_Kp      -=10; break; 
+  203   4              case 2: Pid_Kd      -=100;break;
+  204   4              case 3: Motor_Pid_speed_Z -=5; 
+  205   4                    if(Motor_Pid_speed_Z==180)
+  206   4                    {
+  207   5                      Pid_Kp=1500;
+  208   5                      Pid_Kd=2000;
+  209   5                      Motor_Pid_Dif_P=4;
+  210   5                      duty_pwm=4000;
+  211   5                    }
+  212   4                    if(Motor_Pid_speed_Z==200)
+  213   4                    {
+  214   5                      Pid_Kp=1500;
+  215   5                      Pid_Kd=3000;
+  216   5                      Motor_Pid_Dif_P=6;
+  217   5                      duty_pwm=4500;
+  218   5                    }
+  219   4                    if(Motor_Pid_speed_Z==220)
+  220   4                    {
+  221   5                      Pid_Kp=1500;
+  222   5                      Pid_Kd=4200;
+  223   5                      Motor_Pid_Dif_P=5;
+  224   5                      duty_pwm=5000;
+  225   5                    }
+  226   4                    if(Motor_Pid_speed_Z==230)
+  227   4                    {
+  228   5                      Pid_Kp=1550;
+  229   5                      Pid_Kd=6200;
+  230   5                      Motor_Pid_Dif_P=7;
+  231   5                      duty_pwm=5100;
+  232   5                    }
+  233   4                    if(Motor_Pid_speed_Z==250)
+  234   4                    {
+  235   5                      Pid_Kp=1700;
+  236   5                      Pid_Kd=6800;
+  237   5                      Motor_Pid_Dif_P=9;
+  238   5                      duty_pwm=5600;
+  239   5                    }
+  240   4                    if(Motor_Pid_speed_Z==260)
+  241   4                    {
+  242   5                      Pid_Kp=1800;
+  243   5                      Pid_Kd=9000;
+  244   5                      Motor_Pid_Dif_P=12;
+  245   5                      duty_pwm=5900;
+  246   5                    }
+  247   4                    break; 
+  248   4              case 4: Motor_Pid_Dif_P       -=1; break;
+  249   4              case 5: duty_pwm          -=100; break;
+  250   4              case 6: duty_pwm_error      -=100; break;
+  251   4              
+  252   4              case 7: Linear_speed -=5; break; 
+  253   4              case 8: Curve_speed  -=5; break; 
+  254   4              
+  255   4              case 9: Motor_Pid_Z_L_Ki  -=10; break;
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 5   
+
+  256   4              case 10: Motor_Pid_Z_L_Kp  -=10; break;
+  257   4              case 11: Motor_Pid_Z_R_Ki  -=10; break;
+  258   4              case 12: Motor_Pid_Z_R_Kp  -=10; break;
+  259   4              
+  260   4            }
+  261   3            EepromWrite();
+  262   3          }
+  263   2          lose=0; plus=0;
+  264   2          if(return_flag==1)   //返回
+  265   2          {
+  266   3            return_flag=0;
+  267   3            Model=1;
+  268   3            cls_flag=0;
+  269   3            ips114_show_flag=0;
+  270   3            grade_flag=0;
+  271   3          }
+  272   2        }
+  273   1        if(ips114_show_flag==2)
+  274   1        {
+  275   2          if(plus==1)
+  276   2          {
+  277   3            switch(Model)
+  278   3            {
+  279   4              case 1: Threshold_multiple_1 +=5; break;
+  280   4              case 2: Threshold_1 +=5; break;
+  281   4              
+  282   4              case 6: Threshold_multiple_2 +=5; break;  
+  283   4              case 7: Threshold_2 +=5; break;       
+  284   4            }
+  285   3            EepromWrite();
+  286   3          }
+  287   2          if(lose==1)
+  288   2          {
+  289   3            switch(Model)
+  290   3            {
+  291   4              case 1: Threshold_multiple_1    -=1; break; 
+  292   4              case 2: Threshold_1 -=1; break;
+  293   4              
+  294   4              case 6: Threshold_multiple_2 -=1; break;  
+  295   4              case 7: Threshold_2 -=1; break;         
+  296   4            }
+  297   3            EepromWrite();
+  298   3          }
+  299   2          lose=0; plus=0;
+  300   2          if(return_flag==1)   //返回
+  301   2          {
+  302   3            return_flag=0;
+  303   3            Model=1;
+  304   3            cls_flag=0;
+  305   3            ips114_show_flag=0;
+  306   3            grade_flag=0;
+  307   3          }
+  308   2        }
+  309   1        if(ips114_show_flag==3||ips114_show_flag==31)
+  310   1        {
+  311   2          if(grade_flag==3)                
+  312   2          {
+  313   3            switch(Model)
+  314   3            {
+  315   4              case 1: ips114_show_element_flag=1; grade_flag=4; Model=0;cls_flag=0; ips114_show_flag=31; break;
+  316   4              case 2: ips114_show_element_flag=2; grade_flag=4; Model=0;cls_flag=0; ips114_show_flag=31; break;
+  317   4              case 3: ips114_show_element_flag=3; grade_flag=4; Model=0;cls_flag=0; ips114_show_flag=31; break;
+  318   4              default:Model=1;break;
+  319   4            }
+  320   3          }
+  321   2          if(ips114_show_element_flag==1||ips114_show_element_flag==41) //环岛
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 6   
+
+  322   2          {
+  323   3            if(grade_flag==5)
+  324   3            {
+  325   4              switch(Model)
+  326   4              {
+  327   5                case 1: ips114_show_ring_flag=1; grade_flag=4; Model=0;cls_flag=0; ips114_show_element_flag=41; brea
+             -k;
+  328   5                case 2: ips114_show_ring_flag=2; grade_flag=4; Model=0;cls_flag=0; ips114_show_element_flag=41; brea
+             -k;
+  329   5                case 3: ips114_show_ring_flag=3; grade_flag=4; Model=0;cls_flag=0; ips114_show_element_flag=41; brea
+             -k;
+  330   5                case 4: ips114_show_ring_flag=4; grade_flag=4; Model=0;cls_flag=0; ips114_show_element_flag=41; brea
+             -k;
+  331   5                case 5: ips114_show_ring_flag=5; grade_flag=4; Model=0;cls_flag=0; ips114_show_element_flag=41; brea
+             -k;
+  332   5                default:Model=1;break;
+  333   5              }
+  334   4            }
+  335   3            if(ips114_show_ring_flag==1 && ips114_show_element_flag==41)
+  336   3            {
+  337   4              if(plus==1)
+  338   4              {
+  339   5                switch(Model)
+  340   5                { 
+  341   6                  case 1: Ring_num                          +=1; break;
+  342   6                  case 2: Ring_flag[0]                      +=1; break;
+  343   6                  case 3: Ring_flag[1]                      +=1; break;
+  344   6                  case 4: Ring_flag[2]                      +=1; break;
+  345   6                  case 5: Ring_flag[3]                      +=1; break;
+  346   6                }
+  347   5                EepromWrite();
+  348   5              }
+  349   4              if(lose==1)
+  350   4              {
+  351   5                switch(Model)
+  352   5                {
+  353   6                  case 1: Ring_num                          -=1; break;
+  354   6                  case 2: Ring_flag[0]                      -=1; break;
+  355   6                  case 3: Ring_flag[1]                      -=1; break;
+  356   6                  case 4: Ring_flag[2]                      -=1; break;
+  357   6                  case 5: Ring_flag[3]                      -=1; break; 
+  358   6                }
+  359   5                EepromWrite();
+  360   5              }
+  361   4              lose=0; plus=0;
+  362   4            }
+  363   3          
+  364   3            if(ips114_show_ring_flag==2 && ips114_show_element_flag==41)
+  365   3            {
+  366   4              if(plus==1)
+  367   4              {
+  368   5                switch(Model)
+  369   5                { 
+  370   6                  case 1: Find_Ring_qulv                        +=2; break;
+  371   6                  case 2: Fing_Ring_sideline                    +=1; break;
+  372   6                  case 3: Ready_In_Ring_encoder                 +=5; break;
+  373   6                  case 4: Ready_In_Ring_sideline                +=5; break;
+  374   6                  case 5: In_Ring_encoder                       +=5; break;
+  375   6                  case 6: Ready_Out_Ring_angle                +=5; break;
+  376   6                  case 7: Out_Ring_angle                      +=5; break;
+  377   6                  case 8: No_Ring_encoder                       +=5; break;   
+  378   6                }
+  379   5                EepromWrite();
+  380   5              }
+  381   4              if(lose==1)
+  382   4              {
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 7   
+
+  383   5                switch(Model)
+  384   5                {
+  385   6                  case 1: Find_Ring_qulv                        -=1; break;
+  386   6                  case 2: Fing_Ring_sideline                    -=1; break;
+  387   6                  case 3: Ready_In_Ring_encoder                 -=1; break;
+  388   6                  case 4: Ready_In_Ring_sideline                -=1; break;
+  389   6                  case 5: In_Ring_encoder                       -=1; break;
+  390   6                  case 6: Ready_Out_Ring_angle                -=1; break;
+  391   6                  case 7: Out_Ring_angle                      -=1; break;
+  392   6                  case 8: No_Ring_encoder                       -=1; break;   
+  393   6                }
+  394   5                EepromWrite();
+  395   5              }
+  396   4              lose=0; plus=0;
+  397   4            }
+  398   3            if(ips114_show_ring_flag==3 && ips114_show_element_flag==41)
+  399   3            {
+  400   4              if(plus==1)
+  401   4              {
+  402   5                switch(Model)
+  403   5                {
+  404   6                  case 1: Pid_Ring_50_P             +=10; break;
+  405   6                  case 2: Pid_Ring_50_D             +=10; break;  
+  406   6                  case 3: Ready_In_50_Ring_speed    +=5; break;
+  407   6                  case 4: In_50_Ring_speed          +=5; break; 
+  408   6                  case 5: Ready_Out_50_Ring_speed   +=5; break;         
+  409   6                }
+  410   5                EepromWrite();
+  411   5              }
+  412   4              if(lose==1)
+  413   4              {
+  414   5                switch(Model)
+  415   5                {
+  416   6                  case 1: Pid_Ring_50_P             -=10; break;
+  417   6                  case 2: Pid_Ring_50_D             -=100; break; 
+  418   6                  case 3: Ready_In_50_Ring_speed    -=5; break;
+  419   6                  case 4: In_50_Ring_speed          -=5; break; 
+  420   6                  case 5: Ready_Out_50_Ring_speed   -=5; break;       
+  421   6                }
+  422   5                EepromWrite();
+  423   5              }
+  424   4              lose=0; plus=0;
+  425   4            }
+  426   3            if(ips114_show_ring_flag==4 && ips114_show_element_flag==41)
+  427   3            {
+  428   4              if(plus==1)
+  429   4              {
+  430   5                switch(Model)
+  431   5                {
+  432   6                  case 1: Pid_Ring_60_P             +=10; break;  
+  433   6                  case 2: Pid_Ring_60_D             +=10; break;    
+  434   6                  case 3: Ready_In_60_Ring_speed    +=5; break; 
+  435   6                  case 4: In_60_Ring_speed          +=5; break;
+  436   6                  case 5: Ready_Out_60_Ring_speed   +=5; break;         
+  437   6                }
+  438   5                EepromWrite();
+  439   5              }
+  440   4              if(lose==1)
+  441   4              {
+  442   5                switch(Model)
+  443   5                {
+  444   6                  case 1: Pid_Ring_60_P             -=10; break;  
+  445   6                  case 2: Pid_Ring_60_D             -=10; break;    
+  446   6                  case 3: Ready_In_60_Ring_speed    -=5; break; 
+  447   6                  case 4: In_60_Ring_speed          -=5; break;
+  448   6                  case 5: Ready_Out_60_Ring_speed   -=5; break;         
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 8   
+
+  449   6                }
+  450   5                EepromWrite();
+  451   5              }
+  452   4              lose=0; plus=0;
+  453   4            }
+  454   3            if(ips114_show_ring_flag==5 && ips114_show_element_flag==41)
+  455   3            {
+  456   4              if(plus==1)
+  457   4              {
+  458   5                switch(Model)
+  459   5                {
+  460   6                  case 1: Pid_Ring_90_P             +=10; break;
+  461   6                  case 2: Pid_Ring_90_D             +=10; break;  
+  462   6                  case 3: Ready_In_90_Ring_speed    +=5; break; 
+  463   6                  case 4: In_90_Ring_speed          +=5; break; 
+  464   6                  case 5: Ready_Out_90_Ring_speed   +=5; break;           
+  465   6                }
+  466   5                EepromWrite();
+  467   5              }
+  468   4              if(lose==1)
+  469   4              {
+  470   5                switch(Model)
+  471   5                {
+  472   6                  case 1: Pid_Ring_90_P           -=5; break;
+  473   6                  case 2: Pid_Ring_90_D           -=5; break; 
+  474   6                  case 3: Ready_In_90_Ring_speed  -=5; break; 
+  475   6                  case 4: In_90_Ring_speed        -=5; break; 
+  476   6                  case 5: Ready_Out_90_Ring_speed   -=5; break;           
+  477   6                }
+  478   5                EepromWrite();
+  479   5              }
+  480   4              lose=0; plus=0;
+  481   4            }
+  482   3          }
+  483   2          if(ips114_show_flag==31&&ips114_show_element_flag==2) //坡道
+  484   2          {
+  485   3            if(plus==1)
+  486   3            {
+  487   4              switch(Model)
+  488   4              {
+  489   5                case 1: Up_Ramp_speed         +=5; break;
+  490   5                case 2: Out_Ramp_speed        +=5; break; 
+  491   5                case 3: Find_Ramp_dis         +=5; break;
+  492   5                case 4: Find_Ramp_width1      +=5; break; 
+  493   5                case 5: Find_Ramp_width2      +=5; break; 
+  494   5                case 6: Find_Ramp_qulv        +=5; break; 
+  495   5                case 7: Up_Ramp_encoder       +=5; break;   
+  496   5                case 8: Out_Ramp_encoder      +=5; break;             
+  497   5              }
+  498   4              EepromWrite();
+  499   4            }
+  500   3            if(lose==1)
+  501   3            {
+  502   4              switch(Model)
+  503   4              {
+  504   5                case 1: Up_Ramp_speed         -=5; break; 
+  505   5                case 2: Out_Ramp_speed        -=5; break; 
+  506   5                case 3: Find_Ramp_dis         -=2; break; 
+  507   5                case 4: Find_Ramp_width1      -=1; break; 
+  508   5                case 5: Find_Ramp_width2      -=1; break; 
+  509   5                case 6: Find_Ramp_qulv        -=1; break; 
+  510   5                case 7: Up_Ramp_encoder       -=5; break; 
+  511   5                case 8: Out_Ramp_encoder      -=5; break;             
+  512   5              }
+  513   4              EepromWrite();
+  514   4            }
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 9   
+
+  515   3            lose=0; plus=0;
+  516   3          }
+  517   2          if(ips114_show_flag==31&&ips114_show_element_flag==3) //十字
+  518   2          {
+  519   3            if(plus==1)
+  520   3            {
+  521   4              switch(Model)
+  522   4              {
+  523   5                case 1: Cross_encoder         +=5; break;
+  524   5                case 2: Out_Zebra_encoder     +=5; break;     
+  525   5              }
+  526   4              EepromWrite();
+  527   4            }
+  528   3            if(lose==1)
+  529   3            {
+  530   4              switch(Model)
+  531   4              {
+  532   5                case 1: Cross_encoder         -=1; break;
+  533   5                case 2: Out_Zebra_encoder     -=1; break;       
+  534   5              }
+  535   4              EepromWrite();
+  536   4            }
+  537   3            lose=0; plus=0;
+  538   3          }
+  539   2          if(return_flag==1 && ips114_show_ring_flag!=0)    //三级菜单退出
+  540   2          {
+  541   3            return_flag=0;
+  542   3            Model=1;
+  543   3            cls_flag=0;
+  544   3            ips114_show_ring_flag=0;
+  545   3            ips114_show_element_flag=1;
+  546   3            grade_flag=4;
+  547   3          }
+  548   2          if(return_flag==1 && ips114_show_element_flag!=0)    //三级菜单退出
+  549   2          {
+  550   3            return_flag=0;
+  551   3            Model=1;
+  552   3            cls_flag=0;
+  553   3            ips114_show_element_flag=0;
+  554   3            ips114_show_flag=3;
+  555   3            grade_flag=2;
+  556   3          }
+  557   2          if(return_flag==1)   //返回
+  558   2          {
+  559   3            return_flag=0;
+  560   3            Model=1;
+  561   3            cls_flag=0;
+  562   3            ips114_show_flag=0;
+  563   3            grade_flag=0;
+  564   3          }
+  565   2        }
+  566   1      }
+  567          /*************************************************************************
+  568          * 函数名称： Flash_Write
+  569          * 功能说明： 将数据写入flash
+  570          * 修改时间： 2019-11-2
+  571          *************************************************************************/
+  572          void EepromWrite(void)
+  573          {
+  574   1        data_buff[0] = Motor_Pid_speed_Z;
+  575   1        data_buff[1] = Motor_Pid_speed_Z>>8;
+  576   1        data_buff[2] = Motor_Pid_Z_L_Ki;
+  577   1        data_buff[3] = Motor_Pid_Z_L_Ki>>8;
+  578   1        data_buff[4] = Motor_Pid_Z_L_Kp;
+  579   1        data_buff[5] = Motor_Pid_Z_L_Kp>>8;
+  580   1        data_buff[6] = Motor_Pid_Z_R_Ki;
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 10  
+
+  581   1        data_buff[7] = Motor_Pid_Z_R_Ki>>8;
+  582   1        data_buff[8] = Motor_Pid_Z_R_Kp;
+  583   1        data_buff[9] = Motor_Pid_Z_R_Kp>>8;
+  584   1        data_buff[10] = Pid_Kp;
+  585   1        data_buff[11] = Pid_Kp>>8;
+  586   1        data_buff[12] = Pid_Kd;
+  587   1        data_buff[13] = Pid_Kd>>8;
+  588   1      
+  589   1        data_buff[14] = Motor_Pid_Dif_P;
+  590   1        data_buff[15] = Motor_Pid_Dif_P>>8;
+  591   1        
+  592   1        data_buff[16] = Threshold_multiple_1;
+  593   1        data_buff[17] = Threshold_multiple_2;
+  594   1        
+  595   1        data_buff[18] = duty_pwm;
+  596   1        data_buff[19] = duty_pwm>>8;
+  597   1        
+  598   1        //元素ui
+  599   1        data_buff[20] = Out_Zebra_encoder;
+  600   1        
+  601   1        data_buff[21] = Cross_encoder;
+  602   1        
+  603   1        data_buff[22] = Find_Ramp_dis;
+  604   1        data_buff[23] = Find_Ramp_width1;
+  605   1        data_buff[24] = Find_Ramp_width2;
+  606   1        data_buff[25] = Find_Ramp_qulv;
+  607   1        data_buff[26] = Up_Ramp_encoder;
+  608   1        data_buff[27] = Out_Ramp_encoder;
+  609   1      
+  610   1        data_buff[28] = Find_Ring_qulv;
+  611   1        data_buff[29] = Fing_Ring_sideline;
+  612   1        data_buff[30] = Ready_In_Ring_encoder;
+  613   1        data_buff[31] = Ready_In_Ring_sideline;
+  614   1        data_buff[32] = In_Ring_encoder;
+  615   1        data_buff[33] = Ready_Out_Ring_angle;
+  616   1        data_buff[34] = Ready_Out_Ring_angle>>8;
+  617   1        data_buff[35] = Out_Ring_angle;
+  618   1        data_buff[36] = Out_Ring_angle>>8;
+  619   1        data_buff[37] = No_Ring_encoder;
+  620   1        
+  621   1        data_buff[38] = Up_Ramp_speed;
+  622   1        data_buff[39] = Up_Ramp_speed>>8;
+  623   1        data_buff[40] = Out_Ramp_speed;
+  624   1        data_buff[41] = Out_Ramp_speed>>8;
+  625   1        
+  626   1        data_buff[42] = Pid_Ring_50_P;
+  627   1        data_buff[43] = Pid_Ring_50_P>>8;
+  628   1        data_buff[44] = Pid_Ring_50_D;
+  629   1        data_buff[45] = Pid_Ring_50_D>>8;
+  630   1        data_buff[46] = Ready_In_50_Ring_speed;
+  631   1        data_buff[47] = Ready_In_50_Ring_speed>>8;
+  632   1        data_buff[48] = In_50_Ring_speed;
+  633   1        data_buff[49] = In_50_Ring_speed>>8;
+  634   1        data_buff[50] = Ready_Out_50_Ring_speed;
+  635   1        data_buff[51] = Ready_Out_50_Ring_speed>>8;
+  636   1        
+  637   1        data_buff[52] = Pid_Ring_60_P;
+  638   1        data_buff[53] = Pid_Ring_60_P>>8;
+  639   1        data_buff[54] = Pid_Ring_60_D;
+  640   1        data_buff[55] = Pid_Ring_60_D>>8;
+  641   1        data_buff[56] = Ready_In_60_Ring_speed;
+  642   1        data_buff[57] = Ready_In_60_Ring_speed>>8;
+  643   1        data_buff[58] = In_60_Ring_speed;
+  644   1        data_buff[59] = In_60_Ring_speed>>8;
+  645   1        data_buff[60] = Ready_Out_60_Ring_speed;
+  646   1        data_buff[61] = Ready_Out_60_Ring_speed>>8;
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 11  
+
+  647   1        
+  648   1        data_buff[62] = Pid_Ring_90_P;
+  649   1        data_buff[63] = Pid_Ring_90_P>>8;
+  650   1        data_buff[64] = Pid_Ring_90_D;
+  651   1        data_buff[65] = Pid_Ring_90_D>>8;
+  652   1        data_buff[66] = Ready_In_90_Ring_speed;
+  653   1        data_buff[67] = Ready_In_90_Ring_speed>>8;
+  654   1        data_buff[68] = In_90_Ring_speed;
+  655   1        data_buff[69] = In_90_Ring_speed>>8;
+  656   1        data_buff[70] = Ready_Out_90_Ring_speed;
+  657   1        data_buff[71] = Ready_Out_90_Ring_speed>>8;
+  658   1      
+  659   1        data_buff[72] = Ring_num;
+  660   1        data_buff[73] = Ring_flag[0];
+  661   1        data_buff[74] = Ring_flag[1];
+  662   1        data_buff[75] = Ring_flag[2];
+  663   1        data_buff[76] = Ring_flag[3];
+  664   1        
+  665   1        data_buff[77] = Linear_speed;
+  666   1        data_buff[78] = Linear_speed>>8;
+  667   1        data_buff[79] = Curve_speed;
+  668   1        data_buff[80] = Curve_speed>>8;
+  669   1        
+  670   1        data_buff[81] = Threshold_1;
+  671   1        data_buff[82] = Threshold_2;
+  672   1        data_buff[83] = duty_pwm_error;
+  673   1        data_buff[84] = duty_pwm_error>>8;
+  674   1        extern_iap_write_bytes(0x0000,data_buff,85);
+  675   1      }
+  676          /*************************************************************************
+  677          * 函数名称： Flash_Read
+  678          * 功能说明： 读数据
+  679          * 修改时间： 2019-11-2
+  680          *************************************************************************/
+  681          void EepromRead(void)
+  682          {
+  683   1        iap_read_bytes(0x0000,data_buff,85);
+  684   1        Motor_Pid_speed_Z     = data_buff[0]+( data_buff[1]<<8);
+  685   1        Motor_Pid_Z_L_Ki      = data_buff[2]+( data_buff[3]<<8);
+  686   1        Motor_Pid_Z_L_Kp      = data_buff[4]+( data_buff[5]<<8);
+  687   1        Motor_Pid_Z_R_Ki      = data_buff[6]+( data_buff[7]<<8);
+  688   1        Motor_Pid_Z_R_Kp      = data_buff[8]+( data_buff[9]<<8);
+  689   1        Pid_Kp          = data_buff[10]+( data_buff[11]<<8);
+  690   1        Pid_Kd          = data_buff[12]+(data_buff[13]<<8);
+  691   1      
+  692   1        Motor_Pid_Dif_P       = data_buff[14]+(data_buff[15]<<8);//
+  693   1        
+  694   1        Threshold_multiple_1  = data_buff[16];
+  695   1        Threshold_multiple_2  = data_buff[17];
+  696   1        
+  697   1        duty_pwm              = data_buff[18]+(data_buff[19]<<8); 
+  698   1        
+  699   1        Out_Zebra_encoder     = data_buff[20];
+  700   1        Cross_encoder         = data_buff[21];
+  701   1        Find_Ramp_dis         = data_buff[22];
+  702   1        Find_Ramp_width1      = data_buff[23];
+  703   1        Find_Ramp_width2      = data_buff[24];
+  704   1        Find_Ramp_qulv        = data_buff[25];
+  705   1        Up_Ramp_encoder       = data_buff[26];
+  706   1        Out_Ramp_encoder      = data_buff[27];
+  707   1        
+  708   1        Find_Ring_qulv        = data_buff[28];
+  709   1        Fing_Ring_sideline    = data_buff[29];
+  710   1        Ready_In_Ring_encoder = data_buff[30];
+  711   1        Ready_In_Ring_sideline= data_buff[31];
+  712   1        In_Ring_encoder       = data_buff[32];
+C251 COMPILER V5.60.0,  KEY                                                                21/08/24  21:41:51  PAGE 12  
+
+  713   1        Ready_Out_Ring_angle  = data_buff[33]+(data_buff[34]<<8); 
+  714   1        Out_Ring_angle        = data_buff[35]+(data_buff[36]<<8); 
+  715   1        No_Ring_encoder       = data_buff[37];
+  716   1        
+  717   1        Up_Ramp_speed         = data_buff[38]+(data_buff[39]<<8); 
+  718   1        Out_Ramp_speed        = data_buff[40]+(data_buff[41]<<8);
+  719   1      
+  720   1        Pid_Ring_50_P           = data_buff[42]+(data_buff[43]<<8);
+  721   1        Pid_Ring_50_D           = data_buff[44]+(data_buff[45]<<8);
+  722   1        Ready_In_50_Ring_speed  = data_buff[46]+(data_buff[47]<<8);
+  723   1        In_50_Ring_speed        = data_buff[48]+(data_buff[49]<<8);
+  724   1        Ready_Out_50_Ring_speed = data_buff[50]+(data_buff[51]<<8);
+  725   1      
+  726   1        Pid_Ring_60_P           = data_buff[52]+(data_buff[53]<<8);
+  727   1        Pid_Ring_60_D           = data_buff[54]+(data_buff[55]<<8);
+  728   1        Ready_In_60_Ring_speed  = data_buff[56]+(data_buff[57]<<8);
+  729   1        In_60_Ring_speed        = data_buff[58]+(data_buff[59]<<8);
+  730   1        Ready_Out_60_Ring_speed = data_buff[60]+(data_buff[61]<<8);
+  731   1      
+  732   1        Pid_Ring_90_P           = data_buff[62]+(data_buff[63]<<8);
+  733   1        Pid_Ring_90_D           = data_buff[64]+(data_buff[65]<<8);
+  734   1        Ready_In_90_Ring_speed  = data_buff[66]+(data_buff[67]<<8);
+  735   1        In_90_Ring_speed        = data_buff[68]+(data_buff[69]<<8);
+  736   1        Ready_Out_90_Ring_speed = data_buff[70]+(data_buff[71]<<8);
+  737   1        
+  738   1        Ring_num =data_buff[72];
+  739   1        Ring_flag[0] = data_buff[73];
+  740   1        Ring_flag[1] = data_buff[74];
+  741   1        Ring_flag[2] = data_buff[75];
+  742   1        Ring_flag[3] = data_buff[76];
+  743   1        
+  744   1        Linear_speed        = data_buff[77]+(data_buff[78]<<8);
+  745   1        Curve_speed         = data_buff[79]+(data_buff[80]<<8);
+  746   1        
+  747   1        Threshold_1 = data_buff[81];
+  748   1        Threshold_2 = data_buff[82];
+  749   1        
+  750   1        duty_pwm_error      = data_buff[83]+(data_buff[84]<<8);
+  751   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      6074     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =       113     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       173     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

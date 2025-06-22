@@ -1,0 +1,119 @@
+C251 COMPILER V5.60.0,  kalman                                                             21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE kalman
+OBJECT MODULE PLACED IN .\Out_File\kalman.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\kalman.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCDI
+                    -R(..\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;.
+                    -.\USER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\kalman.lst) TABS(2) OBJECT(.\Out_File\kalman.obj)
+                    - 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          #include "math.h"
+    3          //float Accel_x;       //X轴加速度值暂存
+    4          //float Accel_y;       //Y轴加速度值暂存
+    5          //float Accel_z;       //Z轴加速度值暂存
+    6          
+    7          //float Gyro_x;        //X轴陀螺仪数据暂存
+    8          //float Gyro_y;        //Y轴陀螺仪数据暂存
+    9          float Gyro_z;        //Z轴陀螺仪数据暂存
+   10          
+   11          //float Angle_gx=0;    //由角速度计算的倾斜角度
+   12          //float Angle_gy=0;    //由角速度计算的倾斜角度
+   13          float Angle_gz=0;    //由角速度计算的倾斜角度
+   14          
+   15          //float Angle_x_temp;  //由加速度计算的x倾斜角度
+   16          //float Angle_y_temp;  //由加速度计算的y倾斜角度
+   17          //float Angle_z_temp;  //由加速度计算的z倾斜角度
+   18          
+   19          //float Angle_X_Final; //X最终倾斜角度
+   20          //float Angle_Y_Final; //Y最终倾斜角度
+   21          //float Angle_Z_Final; //Z最终倾斜角度
+   22          //角度计算
+   23          void Angle_Calcu(void)
+   24          {
+   25   1          //范围为2g时，换算关系：16384 LSB/g
+   26   1      //    float rad;
+   27   1      //    float deg = rad*180/3.14;
+   28   1      //    float x,y,z;
+   29   1                                        // 获取 IMU660RA 加速度计数据
+   30   1          imu660ra_get_gyro();  
+   31   1      
+   32   1      //    Accel_x = imu660ra_acc_x;    //x轴加速度值暂存
+   33   1      //    Accel_y = imu660ra_acc_y;    //y轴加速度值暂存
+   34   1      //    Accel_z = imu660ra_acc_z;    //z轴加速度值暂存
+   35   1      //    Gyro_x  = imu660ra_gyro_x;  //x轴陀螺仪值暂存
+   36   1      //    Gyro_y  = imu660ra_gyro_y;  //y轴陀螺仪值暂存
+   37   1          Gyro_z  = imu660ra_gyro_z;  //z轴陀螺仪值暂存
+   38   1      
+   39   1      //    //处理x轴加速度
+   40   1      //    if(Accel_x<32764) x=Accel_x/16384;
+   41   1      //    else              x=1-(Accel_x-49152)/16384;
+   42   1      
+   43   1      //    //处理y轴加速度
+   44   1      //    if(Accel_y<32764) y=Accel_y/16384;
+   45   1      //    else              y=1-(Accel_y-49152)/16384;
+   46   1      
+   47   1      //    //处理z轴加速度
+   48   1      //    if(Accel_z<32764) z=Accel_z/16384;
+   49   1      //    else              z=(Accel_z-49152)/16384;
+   50   1      
+   51   1      //    //用加速度计算三个轴和水平面坐标系之间的夹角
+   52   1      //    Angle_x_temp=(atan(y/z))*180/3.1415926;
+   53   1      //    Angle_y_temp=(atan(x/z))*180/3.1415926;
+   54   1      //    Angle_z_temp=(atan(x/y))*180/3.1415926;
+   55   1      
+   56   1      //    //角度的正负号
+C251 COMPILER V5.60.0,  kalman                                                             21/08/24  21:41:51  PAGE 2   
+
+   57   1      ////    if(Accel_x<32764) Angle_y_temp = +Angle_y_temp;
+   58   1      ////    if(Accel_x>32764) Angle_y_temp = -Angle_y_temp;
+   59   1      ////    if(Accel_y<32764) Angle_x_temp = +Angle_x_temp;
+   60   1      ////    if(Accel_y>32764) Angle_x_temp = -Angle_x_temp;
+   61   1      //    if(Accel_z<32764) Angle_z_temp = +Angle_z_temp;
+   62   1      //    if(Accel_z>32764) Angle_z_temp = -Angle_z_temp;
+   63   1      
+   64   1          //角速度
+   65   1          //向前运动
+   66   1      //    if(Gyro_x<32768) Gyro_x=-(Gyro_x/16.4);//范围为1000deg/s时，换算关系：16.4 LSB/(deg/s)
+   67   1      //    //向后运动
+   68   1      //    if(Gyro_x>32768) Gyro_x=+(65535-Gyro_x)/16.4;
+   69   1      //    //向前运动
+   70   1      //    if(Gyro_y<32768) Gyro_y=-(Gyro_y/16.4);//范围为1000deg/s时，换算关系：16.4 LSB/(deg/s)
+   71   1      //    //向后运动
+   72   1      //    if(Gyro_y>32768) Gyro_y=+(65535-Gyro_y)/16.4;
+   73   1          //向前运动
+   74   1          if(Gyro_z<32768) Gyro_z=-(Gyro_z/16.4);//范围为1000deg/s时，换算关系：16.4 LSB/(deg/s)
+   75   1          //向后运动
+   76   1          if(Gyro_z>32768) Gyro_z=+(65535-Gyro_z)/16.4;
+   77   1      
+   78   1         
+   79   1          Angle_gz = Angle_gz + Gyro_z*0.005;  //角速度积分得到倾斜角度.越大积分出来的角度越大
+   80   1      //    Angle_gy = Angle_gy + Gyro_y*0.005;  //角速度积分得到倾斜角度.越大积分出来的角度越大
+   81   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       127     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =         8     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =         8     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

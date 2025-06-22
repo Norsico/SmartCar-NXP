@@ -1,0 +1,70 @@
+C251 COMPILER V5.60.0,  EM                                                                 21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE EM
+OBJECT MODULE PLACED IN .\Out_File\EM.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\EM.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCDIR(..
+                    -\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;..\US
+                    -ER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\EM.lst) TABS(2) OBJECT(.\Out_File\EM.obj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          #include "math.h"
+    3          
+    4          float  AD_Right=0,AD_Lift=0;
+    5          float  RightAverage=0,LeftAverage=0;
+    6          float  distance,distance_L,distance_R;
+    7          
+    8          
+    9          void infrared_detection()
+   10          {  
+   11   1        int16   RightADC[20],LeftADC[20]; 
+   12   1        int i;
+   13   1        int Right_Sum=0,Left_Sum=0;
+   14   1        for(i=0;i<20;i++)
+   15   1        {   
+   16   2          LeftADC[i]=adc_once(ADC_P11, ADC_12BIT);   
+   17   2          Left_Sum+=LeftADC[i];
+   18   2          RightADC[i]=adc_once(ADC_P14, ADC_12BIT);  
+   19   2          Right_Sum+=RightADC[i];
+   20   2        }
+   21   1        LeftAverage=Left_Sum/20;
+   22   1        RightAverage=Right_Sum/20; 
+   23   1        AD_Lift =LeftAverage*3.30/4096;
+   24   1        AD_Right=RightAverage*3.30/4096;
+   25   1       
+   26   1        distance_L=26.481*pow(AD_Lift,(-1.05));   
+   27   1        distance_R=26.481*pow(AD_Right,(-1.05));   
+   28   1      
+   29   1        if(distance_L>150.00) distance_L=150.00;        
+   30   1        if(distance_L<20.00) distance_L=20.00;
+   31   1        if(distance_R>150.00) distance_R=150.00;        
+   32   1        if(distance_R<20.00) distance_R=20.00;
+   33   1          
+   34   1        distance=(distance_L+distance_R)*0.5;
+   35   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       437     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =       114     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =        32     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

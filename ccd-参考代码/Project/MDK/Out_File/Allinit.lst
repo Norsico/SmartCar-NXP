@@ -1,0 +1,105 @@
+C251 COMPILER V5.60.0,  Allinit                                                            21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE Allinit
+OBJECT MODULE PLACED IN .\Out_File\Allinit.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\Allinit.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCD
+                    -IR(..\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;
+                    -..\USER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\Allinit.lst) TABS(2) OBJECT(.\Out_File\Allinit.o
+                    -bj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          void Timer_Init(void)
+    4          {
+    5   1        ctimer_count_init(SPEEDL_PLUSE);  //初始化定时器0作为外部计数
+    6   1        ctimer_count_init(SPEEDR_PLUSE);  //初始化定时器3作为外部计数
+    7   1        pit_timer_ms(TIM_4 ,5);
+    8   1        
+    9   1      }
+   10          void Gpio_En_Init(void)
+   11          {
+   12   1        gpio_mode(P4_4,GPIO);  //按键初始化GPI_IMPEDANCE
+   13   1        gpio_mode(P5_1,GPIO);
+   14   1        gpio_mode(P3_7,GPIO);
+   15   1        gpio_mode(P4_5,GPIO);
+   16   1        gpio_mode(P4_6,GPIO);
+   17   1        gpio_mode(P3_6,GPIO);
+   18   1      
+   19   1        
+   20   1        adc_init(ADC_P11,ADC_SYSclk_DIV_2);
+   21   1        adc_init(ADC_P14,ADC_SYSclk_DIV_2);
+   22   1      
+   23   1        gpio_mode(P3_2, GPO_PP);//蜂鸣器初始化
+   24   1        P32=1;//关闭蜂鸣器
+   25   1        
+   26   1        pwm_init(PWMA_CH2N_P13, 17000, 0);  //初始化PWM1  使用P60引脚  初始化频率为17Khz
+   27   1        pwm_init(PWMA_CH4P_P26, 17000, 0);  //初始化PWM2  使用P62引脚  初始化频率为17Khz
+   28   1        
+   29   1        gpio_mode(P1_0, GPO_PP);  // P10引脚设置为推挽输出 右
+   30   1        gpio_mode(P2_4, GPO_PP);  // P24引脚设置为推挽输出 左
+   31   1      }
+   32          void beep_on()
+   33          {
+   34   1        P32 = 1;
+   35   1      }
+   36          
+   37          void beep_off()
+   38          {
+   39   1        P32 = 0;
+   40   1      }
+   41          void All_Init(void)
+   42          {
+   43   1        imu660ra_init(); //陀螺仪
+   44   1      //  wireless_uart_init();
+   45   1        
+   46   1        Gpio_En_Init();
+   47   1        servo_init();
+   48   1        Duct_init();  //电调
+   49   1        
+   50   1        IPS114Init();
+   51   1        
+   52   1        iap_init();          
+   53   1        iap_set_tps();     
+   54   1        EepromRead();
+   55   1        
+   56   1        ccd_init(); 
+C251 COMPILER V5.60.0,  Allinit                                                            21/08/24  21:41:51  PAGE 2   
+
+   57   1        ccd_collect();
+   58   1        delay_ms(5);
+   59   1        ccd_collect();    //采集两个ccd数据  //再采集
+   60   1        delay_ms(5);
+   61   1        CCDimage_init();
+   62   1        
+   63   1        Timer_Init();
+   64   1        
+   65   1        PID_init(); 
+   66   1        Motor_Pid_init();
+   67   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =       235     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =    ------     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =    ------     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

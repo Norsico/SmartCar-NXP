@@ -1,0 +1,369 @@
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 1   
+
+
+C251 COMPILER V5.60.0, COMPILATION OF MODULE ccd
+OBJECT MODULE PLACED IN .\Out_File\ccd.obj
+COMPILER INVOKED BY: C:\Keil_v5\C251\BIN\C251.EXE ..\CODE\ccd.c XSMALL WARNINGLEVEL(3) OPTIMIZE(0,SPEED) BROWSE INCDIR(.
+                    -.\..\Libraries\libraries;..\..\Libraries\seekfree_libraries;..\..\Libraries\seekfree_peripheral;..\CODE;..\USER\inc;..\U
+                    -SER\src;..\..\Libraries\seekfree_components) DEBUG PRINT(.\Out_File\ccd.lst) TABS(2) OBJECT(.\Out_File\ccd.obj) 
+
+stmt  level    source
+
+    1          #include "headfile.h"
+    2          
+    3          int i=0;
+    4          
+    5          CCDInformation CCD1 = {0};//CCD1原始图像相关数据
+    6          CCDInformation CCD2 = {0};//CCD2原始图像相关数据
+    7          
+    8          TrackInformation Trk = {0};//赛道信息
+    9          
+   10          uint8 Threshold_multiple_1=0,Threshold_multiple_2=0;
+   11          uint8 Threshold_1=0,Threshold_2=0;
+   12          
+   13          void CCDimage_init()
+   14          {
+   15   1        Trk.middle_sideline1=63;
+   16   1        Trk.middle_sideline2=63;
+   17   1        CCD1.bin_thrd=0;
+   18   1        CCD2.bin_thrd=0;
+   19   1      }
+   20          
+   21          void CCD1_get()
+   22          {
+   23   1        CCD1.max=0;CCD1.min=ccd_data_ch1[4];
+   24   1        CCD1.aver=0;
+   25   1        for(i=5;i<=122;i++)
+   26   1        {
+   27   2          if(ccd_data_ch1[i]>CCD1.max)CCD1.max=ccd_data_ch1[i];
+   28   2          if(ccd_data_ch1[i]<CCD1.min)CCD1.min=ccd_data_ch1[i];
+   29   2        }
+   30   1        for(i=48;i<78;i++)
+   31   1        {
+   32   2          CCD1.aver=CCD1.aver+(ccd_data_ch1[i]/30);
+   33   2        }
+   34   1        if(CCD1.bin_thrd == 0){CCD1.bin_thrd = 1;}
+   35   1        else if(CCD1.bin_thrd == 1)
+   36   1        {CCD1.bin_thrd = (uint32)(CCD1.aver*Threshold_1/100);}
+   37   1        CCD1.threshold=(((uint32)(CCD1.max-CCD1.min)*100)/(CCD1.max+CCD1.min))*Threshold_multiple_1/100;
+   38   1      }
+   39          
+   40          void CCD2_get()
+   41          {
+   42   1        CCD2.max=0;CCD2.min=ccd_data_ch2[4];
+   43   1        CCD2.aver=0;
+   44   1        for(i=10;i<=117;i++)
+   45   1        {
+   46   2          if(ccd_data_ch2[i]>CCD2.max)CCD2.max=ccd_data_ch2[i];
+   47   2          if(ccd_data_ch2[i]<CCD2.min)CCD2.min=ccd_data_ch2[i];
+   48   2        }
+   49   1        for(i=53;i<73;i++)
+   50   1        {
+   51   2          CCD2.aver=CCD2.aver+(ccd_data_ch2[i]/20);
+   52   2        }
+   53   1        if(CCD2.bin_thrd == 0){CCD2.bin_thrd = 1;}
+   54   1        else if(CCD2.bin_thrd == 1)
+   55   1        {CCD2.bin_thrd = (uint32)(CCD2.aver*Threshold_2/100);}
+   56   1        CCD2.threshold=(((uint32)(CCD2.max-CCD2.min)*100)/(CCD2.max+CCD2.min))*Threshold_multiple_2/100;
+   57   1      }
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 2   
+
+   58          uint8 CCD1_left_flag=0;
+   59          uint8 CCD1_right_flag=0;
+   60          uint8 CCD2_left_flag=0;
+   61          uint8 CCD2_right_flag=0;
+   62          
+   63          uint8 black_write_1=0;
+   64          uint8 black_write_2=0;
+   65          
+   66          void left_right_sideline()
+   67          {
+   68   1        Trk.middle_sideline1_last=Trk.middle_sideline1;
+   69   1        Trk.middle_sideline2_last=Trk.middle_sideline2;
+   70   1        
+   71   1        for(i=Trk.middle_sideline1_last;i>5;i--)
+   72   1        {
+   73   2          if((abs((uint32)(ccd_data_ch1[i]-ccd_data_ch1[i-5]))*100/(ccd_data_ch1[i]+ccd_data_ch1[i-5]))>CCD1.thre
+             -shold 
+   74   2            && ccd_data_ch1[i]>ccd_data_ch1[i-5])
+   75   2          {
+   76   3            Trk.left_sideline1=i;
+   77   3            CCD1_left_flag=1;  //找到邊界
+   78   3            break;
+   79   3          }
+   80   2          else 
+   81   2          {
+   82   3            Trk.left_sideline1=5;
+   83   3            CCD1_left_flag=0;  //没找到边界
+   84   3          }
+   85   2        }
+   86   1        for(i=Trk.middle_sideline1_last;i<122;i++)
+   87   1        {
+   88   2          if((abs((uint32)(ccd_data_ch1[i]-ccd_data_ch1[i+5]))*100/(ccd_data_ch1[i]+ccd_data_ch1[i+5]))>CCD1.thre
+             -shold
+   89   2            && ccd_data_ch1[i]>ccd_data_ch1[i+5])
+   90   2          {
+   91   3            Trk.right_sideline1=i;
+   92   3            CCD1_right_flag=1; //找到邊界
+   93   3            break;
+   94   3          }
+   95   2          else 
+   96   2          {
+   97   3            Trk.right_sideline1=122;
+   98   3            CCD1_right_flag=0;//没找到边界
+   99   3          }
+  100   2        } 
+  101   1        
+  102   1        if(CCD1.aver<CCD1.bin_thrd)
+  103   1        {
+  104   2          black_write_1=1;
+  105   2        }
+  106   1        else black_write_1=0;
+  107   1        
+  108   1        if(CCD1_left_flag==1&&CCD1_right_flag==0)
+  109   1        {
+  110   2          for(i=Trk.left_sideline1;i<122;i++)
+  111   2          {
+  112   3            if((abs((uint32)(ccd_data_ch1[i]-ccd_data_ch1[i+5]))*100/(ccd_data_ch1[i]+ccd_data_ch1[i+5]))>CCD1.thr
+             -eshold
+  113   3              && ccd_data_ch1[i]>ccd_data_ch1[i+5])
+  114   3            {
+  115   4              Trk.right_sideline1=i;
+  116   4              CCD1_right_flag=1;
+  117   4              break;
+  118   4            }
+  119   3            else 
+  120   3            {
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 3   
+
+  121   4              Trk.right_sideline1=122;
+  122   4              CCD1_right_flag=0;
+  123   4            }
+  124   3          } 
+  125   2        }
+  126   1        else if(CCD1_left_flag==0 && CCD1_right_flag==1)
+  127   1        {
+  128   2          for(i=Trk.right_sideline1;i>5;i--)
+  129   2          {
+  130   3            if((abs((uint32)(ccd_data_ch1[i]-ccd_data_ch1[i-5]))*100/(ccd_data_ch1[i]+ccd_data_ch1[i-5]))>CCD1.thr
+             -eshold
+  131   3              && ccd_data_ch1[i]>ccd_data_ch1[i-5])
+  132   3            {
+  133   4              Trk.left_sideline1=i;
+  134   4              CCD1_left_flag=1;
+  135   4              break;
+  136   4            }
+  137   3            else 
+  138   3            {
+  139   4              Trk.left_sideline1=5;
+  140   4              CCD1_left_flag=0;
+  141   4            }
+  142   3          }
+  143   2        }
+  144   1        
+  145   1        for(i=Trk.middle_sideline2_last;i>10;i--)
+  146   1        {
+  147   2          if((abs((uint32)(ccd_data_ch2[i]-ccd_data_ch2[i-5]))*100/(ccd_data_ch2[i]+ccd_data_ch2[i-5]))>CCD2.thre
+             -shold
+  148   2            && ccd_data_ch2[i]>ccd_data_ch2[i-5])
+  149   2          {
+  150   3            Trk.left_sideline2=i;
+  151   3            CCD2_left_flag=1;
+  152   3            break;
+  153   3          }
+  154   2          else
+  155   2          {
+  156   3            Trk.left_sideline2=10;
+  157   3            CCD2_left_flag=0;
+  158   3          }
+  159   2        }
+  160   1        for(i=Trk.middle_sideline2_last;i<117;i++)
+  161   1        {
+  162   2          if((abs((uint32)(ccd_data_ch2[i]-ccd_data_ch2[i+5]))*100/(ccd_data_ch2[i]+ccd_data_ch2[i+5]))>CCD2.thre
+             -shold
+  163   2            && ccd_data_ch2[i]>ccd_data_ch2[i+5])
+  164   2          {
+  165   3            Trk.right_sideline2=i;
+  166   3            CCD2_right_flag=1;
+  167   3            break;
+  168   3          }
+  169   2          else
+  170   2          {
+  171   3            Trk.right_sideline2=117;
+  172   3            CCD2_right_flag=0;
+  173   3          }     
+  174   2        }   
+  175   1        
+  176   1        if(CCD2_left_flag==1&&CCD2_right_flag==0)
+  177   1        {
+  178   2          for(i=Trk.left_sideline2;i<117;i++)
+  179   2          {
+  180   3            if((abs((uint32)(ccd_data_ch2[i]-ccd_data_ch2[i+10]))*100/(ccd_data_ch2[i]+ccd_data_ch2[i+10]))>CCD2.t
+             -hreshold
+  181   3              && ccd_data_ch2[i]>ccd_data_ch2[i+10])
+  182   3            {
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 4   
+
+  183   4              Trk.right_sideline2=i;
+  184   4              CCD2_right_flag=1;
+  185   4              break;
+  186   4            }
+  187   3            else 
+  188   3            {
+  189   4              Trk.right_sideline2=117;
+  190   4              CCD2_right_flag=0;
+  191   4            }
+  192   3          } 
+  193   2        }
+  194   1        else if(CCD2_left_flag==0&&CCD2_right_flag==1)
+  195   1        {
+  196   2          for(i=Trk.right_sideline2;i>10;i--)
+  197   2          {
+  198   3            if((abs((uint32)(ccd_data_ch2[i]-ccd_data_ch2[i-10]))*100/(ccd_data_ch2[i]+ccd_data_ch2[i-10]))>CCD2.t
+             -hreshold
+  199   3              && ccd_data_ch2[i]>ccd_data_ch2[i-10])
+  200   3            {
+  201   4              Trk.left_sideline2=i;
+  202   4              CCD2_left_flag=1;
+  203   4              break;
+  204   4            }
+  205   3            else 
+  206   3            {
+  207   4              Trk.left_sideline2=10;
+  208   4              CCD2_left_flag=0;
+  209   4            }
+  210   3          }
+  211   2        } 
+  212   1          
+  213   1        if(CCD2.aver<CCD2.bin_thrd)
+  214   1        {
+  215   2          black_write_2=1;
+  216   2        }
+  217   1        else black_write_2=0; 
+  218   1        
+  219   1      
+  220   1      }
+  221          void middle_sideline()
+  222          { 
+  223   1        Trk.middle_sideline1=(Trk.left_sideline1+Trk.right_sideline1)/2;
+  224   1        Trk.middle_sideline2=(Trk.left_sideline2+Trk.right_sideline2)/2;
+  225   1        
+  226   1        Trk.Width1=Trk.right_sideline1-Trk.left_sideline1;
+  227   1        Trk.Width2=Trk.right_sideline2-Trk.left_sideline2;
+  228   1        
+  229   1        if(Cross_flag==1)
+  230   1        {
+  231   2          Trk.middle_sideline1=Trk.middle_sideline2;
+  232   2        }
+  233   1        
+  234   1        if((Ring_state==1 || Ring_state==5) && Ring_left==1)//入环出环补线Ring_state==1 || 
+  235   1        {
+  236   2          Trk.middle_sideline1=Trk.right_sideline1-(CCD1_set_width/2);
+  237   2        }
+  238   1        if((Ring_state==2 || Ring_state==4) && Ring_left==1)
+  239   1        {
+  240   2          Trk.middle_sideline1=Trk.left_sideline1+(CCD1_set_width/2);
+  241   2        }
+  242   1        if((Ring_state==1 || Ring_state==5) && Ring_right==1)//入环出环补线Ring_state==1 ||
+  243   1        {
+  244   2          Trk.middle_sideline1=Trk.left_sideline1+(CCD1_set_width/2);
+  245   2        }
+  246   1        if((Ring_state==2 || Ring_state==4) && Ring_right==1) 
+  247   1        {
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 5   
+
+  248   2          Trk.middle_sideline1=Trk.right_sideline1-(CCD1_set_width/2);
+  249   2        }
+  250   1      
+  251   1      }
+  252          uint8 Straight=0;  //直道
+  253          uint8 curve=0; //弯道
+  254          
+  255          void CCD_Per()
+  256          {
+  257   1        //计算左斜率
+  258   1        if((Trk.left_sideline1<=63.5&&Trk.left_sideline2<=63.5)||(Trk.left_sideline1>63.5&&Trk.left_sideline2>63
+             -.5))
+  259   1        {
+  260   2          Trk.left_qulu= abs(abs(63.5-Trk.left_sideline1)*1.0-(abs(63.5-Trk.left_sideline2)*CCD1_set_width/CCD2_s
+             -et_width));
+  261   2        }
+  262   1        else if((Trk.left_sideline1<=63.5&&Trk.left_sideline2>63.5)||(Trk.left_sideline1>63.5&&Trk.left_sideline
+             -2<=63.5))
+  263   1        {
+  264   2          Trk.left_qulu= abs(abs(63.5-Trk.left_sideline1)*1.0+(abs(63.5-Trk.left_sideline2)*CCD1_set_width/CCD2_s
+             -et_width));
+  265   2        }
+  266   1      
+  267   1        //计算右斜率
+  268   1        if((Trk.right_sideline1>=63.5&&Trk.right_sideline2>=63.5)||(Trk.right_sideline1<63.5&&Trk.right_sideline
+             -2<63.5))
+  269   1        {
+  270   2          Trk.right_qulu= abs(abs(Trk.right_sideline1-63.5)*1.0-(abs(Trk.right_sideline2-63.5)*CCD1_set_width/CCD
+             -2_set_width));
+  271   2        }
+  272   1        else if((Trk.right_sideline1<=63.5&&Trk.right_sideline2>63.5)||(Trk.right_sideline1>63.5&&Trk.right_side
+             -line2<=63.5))
+  273   1        {
+  274   2          Trk.right_qulu= abs(abs(Trk.right_sideline1-63.5)*1.0+(abs(Trk.right_sideline2-63.5)*CCD1_set_width/CCD
+             -2_set_width));
+  275   2        }
+  276   1        
+  277   1        //利用斜率速度决策
+  278   1        if(Trk.right_qulu<6 && Trk.left_qulu<6 && abs(Trk.middle_sideline1-Trk.middle_sideline2)<6
+  279   1          && abs(Trk.middle_sideline1-63.5)<6 && abs(Trk.middle_sideline2-63.5)<6)
+  280   1        {
+  281   2          Straight=1;
+  282   2          curve=0;
+  283   2        }
+  284   1        else 
+  285   1        {
+  286   2          Straight=0;
+  287   2          curve=1;
+  288   2        }
+  289   1        
+  290   1      }
+  291          
+  292          void CCD_Processing()
+  293          {
+  294   1        CCD1_get();
+  295   1        CCD2_get();
+  296   1      
+  297   1        left_right_sideline();
+  298   1        
+  299   1        CCD_Per();
+  300   1        
+  301   1        if(encoder_integral>25)
+  302   1        {
+  303   2          element();
+  304   2        }
+  305   1        
+C251 COMPILER V5.60.0,  ccd                                                                21/08/24  21:41:51  PAGE 6   
+
+  306   1        middle_sideline();
+  307   1        
+  308   1      }
+
+
+Module Information          Static   Overlayable
+------------------------------------------------
+  code size            =      3544     ------
+  ecode size           =    ------     ------
+  data size            =    ------     ------
+  idata size           =    ------     ------
+  pdata size           =    ------     ------
+  xdata size           =    ------     ------
+  xdata-const size     =    ------     ------
+  edata size           =        68     ------
+  bit size             =    ------     ------
+  ebit size            =    ------     ------
+  bitaddressable size  =    ------     ------
+  ebitaddressable size =    ------     ------
+  far data size        =    ------     ------
+  huge data size       =    ------     ------
+  const size           =    ------     ------
+  hconst size          =       132     ------
+End of Module Information.
+
+
+C251 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
