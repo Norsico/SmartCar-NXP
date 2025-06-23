@@ -42,14 +42,16 @@ CCD1_SET_WIDTH = 38  # 近端CCD设定宽度
 CCD2_SET_WIDTH = 20  # 远端CCD设定宽度
 
 # 阈值参数 - 需要调试
-THRESHOLD_MULTIPLE_1 = 18.8  # CCD1阈值倍数 (%)
-THRESHOLD_MULTIPLE_2 = 45.7  # CCD2阈值倍数 (%)
-THRESHOLD_1 = 42  # CCD1二值化阈值 (%)
-THRESHOLD_2 = 42  # CCD2二值化阈值 (%)
+THRESHOLD_MULTIPLE_1 = 35  # CCD1阈值倍数 (%)
+THRESHOLD_MULTIPLE_2 = 55  # CCD2阈值倍数 (%)
+THRESHOLD_1 = 50  # CCD1二值化阈值 (%)
+THRESHOLD_2 = 50  # CCD2二值化阈值 (%)
 
-# 环岛状态定义
+# 环岛状态定义 - 左环岛三阶段
 NO_RING = 0
 FIND_RING = 1
+CONFIRM_RING = 2
+ENTER_RING = 3
 
 # 环岛相关全局变量
 ring_state = NO_RING
@@ -59,10 +61,14 @@ ring_right = False
 # 环岛检测阈值
 RING_QULU_THRESHOLD = 20  # 环岛曲率检测阈值
 
+# 左环岛确认参数
+CONFIRM_COUNT_MAX = 100  # 确认计数器最大值（约等于2秒，50Hz*2s=100）
+
 # 移除十字路口和坡道检测功能，只保留环岛检测
 
 # 编码器积分值（用于距离计算）
 encoder_integral = 0
+ring_confirm_counter = 0  # 环岛确认计数器
 
 # CCD信息类
 class CCDInformation:
@@ -83,12 +89,20 @@ class TrackInformation:
         self.middle_sideline1_last = 63.0
         self.width1 = 0
         
+        # CCD1历史边界值
+        self.left_sideline1_last = 0
+        self.right_sideline1_last = 0
+        
         # CCD2(远端)原图像
         self.left_sideline2 = 0
         self.right_sideline2 = 0
         self.middle_sideline2 = 63.0
         self.middle_sideline2_last = 63.0
         self.width2 = 0
+        
+        # CCD2历史边界值
+        self.left_sideline2_last = 0
+        self.right_sideline2_last = 0
         
         # 曲率计算
         self.left_qulu = 0.0  # 左边曲率
@@ -120,6 +134,17 @@ end_state = end_switch.value()
 # 蜂鸣器初始化
 beep = Pin('D24', Pin.OUT, pull=Pin.PULL_UP_47K, value=False)
 
+# 蜂鸣器状态标志位
+BEEP_OFF = 0
+BEEP_SHORT = 1
+BEEP_LONG = 2
+BEEP_ON = 3
+BEEP_DOUBLE_SHORT = 4
+
+beep_state = BEEP_OFF
+beep_timer = 0
+beep_double_count = 0  # 双响计数器
+
 def beep_on():
     """蜂鸣器响"""
     beep.high()
@@ -128,17 +153,76 @@ def beep_off():
     """蜂鸣器停"""
     beep.low()
 
-def beep_short():
-    """短响一声"""
-    beep_on()
-    time.sleep_ms(100)
-    beep_off()
+def set_beep_short():
+    """设置短响标志"""
+    global beep_state, beep_timer
+    beep_state = BEEP_SHORT
+    beep_timer = 5  # 短响100ms，20ms*5=100ms
 
-def beep_long():
-    """长响一声 - 延长到1秒，便于识别进入环岛状态"""
-    beep_on()
-    time.sleep_ms(1000)  # 延长响声时间，便于调试时识别
-    beep_off()
+def set_beep_long():
+    """设置长响标志"""
+    global beep_state, beep_timer
+    beep_state = BEEP_LONG
+    beep_timer = 50  # 长响1000ms，20ms*50=1000ms
+
+def set_beep_double_short():
+    """设置双短响标志"""
+    global beep_state, beep_timer, beep_double_count
+    beep_state = BEEP_DOUBLE_SHORT
+    beep_timer = 5  # 第一声短响100ms
+    beep_double_count = 0  # 重置计数器
+
+def set_beep_off():
+    """设置蜂鸣器停止标志"""
+    global beep_state
+    beep_state = BEEP_OFF
+
+def beep_process():
+    """蜂鸣器处理函数 - 在主循环中调用"""
+    global beep_state, beep_timer, beep_double_count
+    
+    if beep_state == BEEP_OFF:
+        beep_off()
+    elif beep_state == BEEP_SHORT:
+        if beep_timer > 0:
+            beep_on()
+            beep_timer -= 1
+        else:
+            beep_off()
+            beep_state = BEEP_OFF
+    elif beep_state == BEEP_LONG:
+        if beep_timer > 0:
+            beep_on()
+            beep_timer -= 1
+        else:
+            beep_off()
+            beep_state = BEEP_OFF
+    elif beep_state == BEEP_DOUBLE_SHORT:
+        if beep_double_count == 0:  # 第一声短响
+            if beep_timer > 0:
+                beep_on()
+                beep_timer -= 1
+            else:
+                beep_off()
+                beep_double_count = 1
+                beep_timer = 5  # 间隔100ms
+        elif beep_double_count == 1:  # 间隔
+            if beep_timer > 0:
+                beep_off()
+                beep_timer -= 1
+            else:
+                beep_double_count = 2
+                beep_timer = 5  # 第二声短响100ms
+        elif beep_double_count == 2:  # 第二声短响
+            if beep_timer > 0:
+                beep_on()
+                beep_timer -= 1
+            else:
+                beep_off()
+                beep_state = BEEP_OFF
+                beep_double_count = 0
+    elif beep_state == BEEP_ON:
+        beep_on()
 
 motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C28_DIR_C29, 13000, duty=0, invert=True)
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False)
@@ -189,8 +273,8 @@ speed_Ki = 0
 speed_Kd = 3.98
 
 # 线路跟踪PD控制器参数
-line_kp = 5 # 比例控制，快速响应
-line_kd = 180  # 微分控制，提高稳定性
+line_kp = 9.9 # 比例控制，快速响应
+line_kd = 70  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
@@ -582,9 +666,13 @@ def left_right_sideline(ccd_data1, ccd_data2):
     if not ccd_data1 or not ccd_data2:
         return
     
-    # 保存上次中线位置
+    # 保存上次中线位置和边界位置
     Trk.middle_sideline1_last = Trk.middle_sideline1
     Trk.middle_sideline2_last = Trk.middle_sideline2
+    Trk.left_sideline1_last = Trk.left_sideline1
+    Trk.right_sideline1_last = Trk.right_sideline1
+    Trk.left_sideline2_last = Trk.left_sideline2
+    Trk.right_sideline2_last = Trk.right_sideline2
     
     # CCD1边界检测 (近端)
     start_pos = int(Trk.middle_sideline1_last)
@@ -734,44 +822,91 @@ def ccd_curvature_calc():
         curve = True
 
 def middle_sideline():
-    """中线计算 - 简化版本，检测到环岛时不修改中线"""
-    global Trk
+    """中线计算 - CCD1主要用于巡线，CCD2主要用于元素检测"""
+    global Trk, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     
-    # 基础中线计算 - 不进行环岛修正
-    Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
-    Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+    # CCD1中线计算 - 主要巡线传感器，考虑丢线情况
+    if CCD1_left_flag and CCD1_right_flag:
+        # 双边都有效，正常计算
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
+    elif CCD1_left_flag and not CCD1_right_flag:
+        # 左边有效，右边丢线，使用上次右边界值计算中线
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1_last) / 2.0
+    elif not CCD1_left_flag and CCD1_right_flag:
+        # 右边有效，左边丢线，使用上次左边界值计算中线
+        Trk.middle_sideline1 = (Trk.left_sideline1_last + Trk.right_sideline1) / 2.0
+    else:
+        # 双边都丢线，保持上次中线值
+        pass  # Trk.middle_sideline1保持不变
+    
+    # CCD2中线计算 - 主要用于元素检测，简单计算即可
+    if CCD2_left_flag and CCD2_right_flag:
+        # 双边都有效，正常计算
+        Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+    else:
+        # 丢线时保持上次中线值，因为CCD2主要用于元素检测而非巡线
+        pass  # Trk.middle_sideline2保持不变
     
     # 宽度计算
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
-    
-    # 注释：检测到环岛时不修改中线，保持正常的线路跟踪
-    # 环岛的处理交给上层控制逻辑来决定
 
 def ring_detection():
-    """环岛检测 - 简化版本，只检测环岛"""
+    """
+    左环岛四阶段识别：
+    1. 发现环岛：远端CCD左侧丢线 + 右边界存在 + 右侧曲率小 → 短响一声
+    2. 确认环岛：在确认时间内满足以下条件 → 短响两声
+       - 远端CCD左侧恢复不丢线
+       - 近端CCD左边界存在  
+       - 远端左边界位置 > 近端左边界位置（几何条件）
+    3. 进入环岛：在确认环岛后，远端CCD左侧再次丢失 → 长响1秒
+    4. 通过环岛：待实现
+    """
     global ring_state, ring_left, ring_right
     global CCD2_left_flag, CCD2_right_flag, black_write_2
-    global RING_QULU_THRESHOLD
+    global RING_QULU_THRESHOLD, CONFIRM_COUNT_MAX
+    global ring_confirm_counter
     
     if ring_state == NO_RING:
-        # 检测左环岛 - 使用远端CCD2检测
-        # 左环岛特征：远端CCD左边界丢失，右边界存在，右侧曲率小
+        # 阶段1：发现左环岛
+        # 特征：远端CCD左侧丢线，右边界存在，右侧曲率小
         if (not CCD2_left_flag and CCD2_right_flag and 
             Trk.right_qulu <= RING_QULU_THRESHOLD and not black_write_2):
             ring_state = FIND_RING
             ring_left = True
             ring_right = False
-            beep_short()  # 短响表示检测到环岛
+            ring_confirm_counter = 0  # 开始计数
+            set_beep_short()  # 发现环岛：短响一声
             
-        # 检测右环岛 - 使用远端CCD2检测  
-        # 右环岛特征：远端CCD右边界丢失，左边界存在，左侧曲率小
-        elif (CCD2_left_flag and not CCD2_right_flag and 
-              Trk.left_qulu <= RING_QULU_THRESHOLD and not black_write_2):
-            ring_state = FIND_RING
-            ring_right = True
+    elif ring_state == FIND_RING and ring_left:
+        # 阶段2：确认左环岛
+        ring_confirm_counter += 1
+        
+        if ring_confirm_counter <= CONFIRM_COUNT_MAX:
+            # 在确认时间内检查左环岛确认条件
+            if (CCD2_left_flag and  # 远端CCD左边界恢复
+                CCD1_left_flag and  # 近端CCD左边界存在
+                Trk.left_sideline1 > 35 and  # 近端CCD左边界位置 > 35
+                Trk.left_sideline2 > Trk.left_sideline1):  # 远端左边界位置 > 近端左边界位置
+                ring_state = CONFIRM_RING
+                set_beep_double_short()  # 确认环岛：短响两声
+        else:
+            # 超过确认时间仍未恢复，取消环岛判断
+            ring_state = NO_RING
             ring_left = False
-            beep_short()  # 短响表示检测到环岛
+            ring_confirm_counter = 0
+            set_beep_off()  # 设置停止响声标志
+            
+    elif ring_state == CONFIRM_RING and ring_left:
+        # 阶段3：进入左环岛
+        # 特征：在确认环岛后，远端CCD左侧再次丢失
+        if not CCD2_left_flag:
+            ring_state = ENTER_RING
+            set_beep_long()  # 进入环岛：长响1秒
+            
+    elif ring_state == ENTER_RING and ring_left:
+        # 阶段4：环岛通过逻辑 - 待后续实现
+        pass
 
 # 移除十字路口和坡道检测函数
 
@@ -782,11 +917,13 @@ def element_detection():
 
 def clear_ring_flag():
     """清除环岛标志位"""
-    global ring_state, ring_left, ring_right
+    global ring_state, ring_left, ring_right, ring_confirm_counter, beep_double_count
     ring_state = NO_RING
     ring_left = False
     ring_right = False
-    beep_off()  # 停止蜂鸣器
+    ring_confirm_counter = 0
+    beep_double_count = 0
+    set_beep_off()  # 设置停止蜂鸣器标志
 
 def ccd_processing(ccd_data1, ccd_data2):
     """CCD主处理函数 - 移植自C语言示例"""
@@ -809,18 +946,12 @@ def ccd_processing(ccd_data1, ccd_data2):
     # 返回融合后的中线偏差
     center = 63.0  # 赛道中心
     
-    # 双CCD融合策略 - 近端为主，远端辅助
-    if CCD1_left_flag and CCD1_right_flag:
-        # 近端双边界都有效，优先使用
+    # 双CCD融合策略 - CCD1主要巡线，CCD2主要元素检测
+    if CCD1_left_flag or CCD1_right_flag:
+        # CCD1有任何边界有效，优先使用（因为CCD1是主要巡线传感器）
         deviation = Trk.middle_sideline1 - center
     elif CCD2_left_flag and CCD2_right_flag:
-        # 远端双边界有效，近端无效时使用
-        deviation = Trk.middle_sideline2 - center
-    elif CCD1_left_flag or CCD1_right_flag:
-        # 近端单边有效
-        deviation = Trk.middle_sideline1 - center
-    elif CCD2_left_flag or CCD2_right_flag:
-        # 远端单边有效
+        # 仅当CCD1完全失效且CCD2双边有效时才使用CCD2
         deviation = Trk.middle_sideline2 - center
     else:
         # 都无效，保持上次偏差
@@ -970,12 +1101,22 @@ def ccd_process(timer):
         ring_status = ""
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "Find"
+        elif ring_state == CONFIRM_RING: ring_status = "Confirm"
+        elif ring_state == ENTER_RING: ring_status = "Enter"
         
         ring_dir = ""
         if ring_left: ring_dir = "L"
         elif ring_right: ring_dir = "R"
         
-        lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir} Key2:Clear", 0xF800)  # 红色
+        # 显示环岛状态和计数信息
+        count_info = ""
+        if ring_state == FIND_RING and ring_left:
+            count_info = f" C:{ring_confirm_counter}/{CONFIRM_COUNT_MAX}"
+            # 显示几何条件状态
+            geo_condition = Trk.left_sideline1 > Trk.left_sideline2 if (CCD1_left_flag and CCD2_left_flag) else False
+            count_info += f" G:{'Y' if geo_condition else 'N'}"
+        
+        lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir}{count_info} Key2:Clear", 0xF800)  # 红色
         
         # 第8行：系统状态 - 始终显示
         lcd.str12(0, 279, f"System:Running Threshold:{RING_QULU_THRESHOLD}", 0x07E0)  # 绿色
@@ -1017,6 +1158,9 @@ while True:
     if ccd_ticker_flag:
         ccd_ticker_flag = False
     
+    # 蜂鸣器处理 - 不阻塞主循环
+    beep_process()
+    
     # WiFi调参更新
     update_wifi_parameters()
     
@@ -1025,5 +1169,8 @@ while True:
         pit3.stop()
         pit2.stop()  # 停止CCD定时器
         break
+    
+    # 主循环延时，控制蜂鸣器更新频率约50Hz
+    time.sleep_ms(20)
     
     gc.collect()
