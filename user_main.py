@@ -75,11 +75,11 @@ original_threshold_1 = THRESHOLD_MULTIPLE_1  # 保存原始阈值
 ring_threshold_1 = 17  # 环岛内部使用的较小阈值
 
 # 环岛检测阈值 - 参考C代码调整
-RING_QULU_THRESHOLD = 12  # 环岛曲率检测阈值（参考代码使用12）
+RING_QULU_THRESHOLD = 5  # 环岛曲率检测阈值（参考代码使用12）
 
 # 环岛各阶段参数 - 需要根据实际测试调整
-READY_IN_RING_ENCODER = 40     # 进入环岛前的编码器距离（增大，因为积分值会更大）
-IN_RING_ENCODER = 80           # 环岛内部编码器距离
+READY_IN_RING_ENCODER = 32     # 进入环岛前的编码器距离（增大，因为积分值会更大）
+IN_RING_ENCODER = 75           # 环岛内部编码器距离
 NO_RING_ENCODER = 100          # 出环岛后的编码器距离
 
 # 环岛速度等级
@@ -929,10 +929,10 @@ def middle_sideline():
             # 环岛内部阶段：基于左边界偏移计算中线（短响两声后立即切换到左侧巡线）
             if CCD1_left_flag:
                 # 有左边界时，使用左边界偏移
-                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 12
+                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 10
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + (CCD1_SET_WIDTH / 2) + 12
+                Trk.middle_sideline1 = Trk.left_sideline1_last + (CCD1_SET_WIDTH / 2) + 10
 
         elif ring_state == OUT_RING:
             # 出环岛阶段：按近端CCD1右边界巡线
@@ -941,6 +941,29 @@ def middle_sideline():
                 Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
             else:
                 # 右边界也丢失时，保持上次中线
+                pass
+    
+    # 右环岛处理
+    elif ring_right:
+        if ring_state == FIND_RING:
+            # 进入环岛阶段：基于左边界偏移计算中线
+            Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2)
+        elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
+            # 环岛内部阶段：基于右边界偏移计算中线（短响两声后立即切换到右侧巡线）
+            if CCD1_right_flag:
+                # 有右边界时，使用右边界偏移
+                Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2) - 11
+            else:
+                # 右边界丢失时，使用上次右边界位置
+                Trk.middle_sideline1 = Trk.right_sideline1_last - (CCD1_SET_WIDTH / 2) - 11
+
+        elif ring_state == OUT_RING:
+            # 出环岛阶段：按近端CCD1左边界巡线
+            if CCD1_left_flag:
+                # 有左边界时，按左边界偏移计算中线
+                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) - 5 
+            else:
+                # 左边界也丢失时，保持上次中线
                 pass
     
     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
@@ -971,6 +994,16 @@ def ring_detection():
             set_beep_short()  # 发现环岛：短响一声
             ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
             
+        # 检测右环岛
+        # 条件：近端CCD右侧丢线 + 左边界存在 + 左侧曲率小 + 远端不是全黑
+        elif (not CCD1_right_flag and CCD1_left_flag and 
+              Trk.left_qulu <= RING_QULU_THRESHOLD and not black_write_2):
+            ring_state = FIND_RING
+            ring_left = False
+            ring_right = True
+            set_beep_short()  # 发现环岛：短响一声
+            ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
+            
         # 如果同时检测到十字（双侧丢线），排除环岛误判
         if (not CCD1_left_flag and not CCD1_right_flag and 
             not black_write_2 and not black_write_1):
@@ -981,7 +1014,7 @@ def ring_detection():
         # 阶段1→2：左环岛确认第一阶段
         # 条件1：编码器距离足够 + 前后端CCD拍摄宽度小于35
         
-        if abs(ring_encoder - encoder_integral) < READY_IN_RING_ENCODER and Trk.width1 < 40 and Trk.width2 < 40:
+        if abs(ring_encoder - encoder_integral) < READY_IN_RING_ENCODER and Trk.width1 < 44 and Trk.width2 < 44:
             # 记录第一阶段完成的编码器值
             ring_encoder = encoder_integral
             ring_state = FIND_RING_STAGE2
@@ -990,6 +1023,23 @@ def ring_detection():
         elif Trk.right_qulu > 30 or abs(ring_encoder - encoder_integral) > READY_IN_RING_ENCODER:  # 右侧曲率过大，可能是误判
             ring_state = NO_RING
             ring_left = False
+            # 恢复近端CCD原始阈值
+            global THRESHOLD_MULTIPLE_1
+            THRESHOLD_MULTIPLE_1 = original_threshold_1
+            
+    elif ring_state == FIND_RING and ring_right:
+        # 阶段1→2：右环岛确认第一阶段
+        # 条件1：编码器距离足够 + 前后端CCD拍摄宽度小于40
+        
+        if abs(ring_encoder - encoder_integral) < READY_IN_RING_ENCODER and Trk.width1 < 40 and Trk.width2 < 40:
+            # 记录第一阶段完成的编码器值
+            ring_encoder = encoder_integral
+            ring_state = FIND_RING_STAGE2
+            set_beep_short()  # 第一阶段完成：短响一声
+            
+        elif Trk.left_qulu > 30 or abs(ring_encoder - encoder_integral) > READY_IN_RING_ENCODER:  # 左侧曲率过大，可能是误判
+            ring_state = NO_RING
+            ring_right = False
             # 恢复近端CCD原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
@@ -1012,15 +1062,37 @@ def ring_detection():
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
+    elif ring_state == FIND_RING_STAGE2 and ring_right:
+        # 阶段2→3：右环岛确认第二阶段
+        # 条件2：远端右边界位置大于100（对称于左环岛的27）
+        
+        if Trk.right_sideline2 > 100:
+            ring_state = READY_IN_RING
+            set_beep_double_short()  # 确认环岛：短响两声
+            # 降低近端CCD阈值，提高边界检测灵敏度
+            global THRESHOLD_MULTIPLE_1
+            THRESHOLD_MULTIPLE_1 = ring_threshold_1
+            
+        elif abs(ring_encoder - encoder_integral) > 50:  # 如果走了太远还没满足条件，可能是误判
+            ring_state = NO_RING
+            ring_right = False
+            # 恢复近端CCD原始阈值
+            global THRESHOLD_MULTIPLE_1
+            THRESHOLD_MULTIPLE_1 = original_threshold_1
+            
     elif ring_state == READY_IN_RING:
         # 阶段2→3：准备进入环岛 -> 在环岛中
         # 条件：编码器距离足够（走了足够远开始执行环岛策略）
-        if abs(ring_encoder - encoder_integral) < IN_RING_ENCODER and Trk.left_sideline2 < 27:
+        if ring_left and abs(ring_encoder - encoder_integral) < IN_RING_ENCODER and Trk.left_sideline2 < 27:
+            ring_state = IN_RING
+            set_beep_long()  # 进入环岛：长响一声
+        elif ring_right and abs(ring_encoder - encoder_integral) < IN_RING_ENCODER and Trk.right_sideline2 > 100:
             ring_state = IN_RING
             set_beep_long()  # 进入环岛：长响一声
         elif abs(ring_encoder - encoder_integral) > IN_RING_ENCODER:   
             ring_state = NO_RING
             ring_left = False
+            ring_right = False
             # 恢复近端CCD原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
@@ -1039,7 +1111,13 @@ def ring_detection():
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
         # 条件：近端CCD1重新检测到边界（出环岛开始）
-        if CCD1_right_flag:
+        if ring_left and CCD1_right_flag:
+            # 左环岛：检测到右边界表示开始出环岛
+            ring_state = OUT_RING
+            ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
+            set_beep_long()  # 出环岛：长响一声
+        elif ring_right and CCD1_left_flag:
+            # 右环岛：检测到左边界表示开始出环岛
             ring_state = OUT_RING
             ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
             set_beep_long()  # 出环岛：长响一声
