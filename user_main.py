@@ -12,7 +12,7 @@ wifi_en = False
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.31.9", "8086")
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.71.9", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -38,16 +38,16 @@ line_control_output = 0  # 线路控制输出
 key = KEY_HANDLER(10)  # 按键扫描周期为10
 
 # CCD算法参数 - 移植自C语言示例
-CCD1_SET_WIDTH = 38  # 近端CCD设定宽度
-CCD2_SET_WIDTH = 20  # 远端CCD设定宽度
+CCD1_SET_WIDTH = 42  # 近端CCD设定宽度
+CCD2_SET_WIDTH = 34  # 远端CCD设定宽度
 
 # 阈值参数 - 需要调试
 # CCD阈值参数 - 根据参考代码优化
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 8  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 8  # 远端适中
+THRESHOLD_MULTIPLE_1 = 38  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 42  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -73,7 +73,7 @@ ring_right = False
 RING_QULU_THRESHOLD = 12  # 环岛曲率检测阈值（参考代码使用12）
 
 # 环岛各阶段参数 - 需要根据实际测试调整
-READY_IN_RING_ENCODER = 40     # 进入环岛前的编码器距离（增大，因为积分值会更大）
+READY_IN_RING_ENCODER = 18     # 进入环岛前的编码器距离（增大，因为积分值会更大）
 IN_RING_ENCODER = 80           # 环岛内部编码器距离
 READY_OUT_RING_ANGLE = 180     # 准备出环岛角度
 OUT_RING_ANGLE = 270           # 出环岛角度
@@ -138,10 +138,7 @@ CCD1_right_flag = False
 CCD2_left_flag = False
 CCD2_right_flag = False
 
-# 赛道宽度判断参数
-NORMAL_TRACK_WIDTH = 20    # 正常赛道半宽（从中线到边界的距离）
-WIDE_TRACK_THRESHOLD = 35  # 宽赛道阈值（超过此值认为丢线）
-VERY_WIDE_THRESHOLD = 45   # 很宽阈值（超过此值认为严重丢线，如十字）
+
 
 # 黑白场景标志
 black_write_1 = False
@@ -187,7 +184,7 @@ def set_beep_long():
     """设置长响标志"""
     global beep_state, beep_timer
     beep_state = BEEP_LONG
-    beep_timer = 50  # 长响1000ms，20ms*50=1000ms
+    beep_timer = 30  # 长响600ms，20ms*30=600ms
 
 def set_beep_double_short():
     """设置双短响标志"""
@@ -918,8 +915,13 @@ def middle_sideline():
             # 进入环岛阶段：基于右边界偏移计算中线
             Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
         elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
-            # 环岛内部阶段：基于左边界偏移计算中线
-            Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 15
+            # 环岛内部阶段：基于左边界偏移计算中线（短响两声后立即切换到左侧巡线）
+            if CCD1_left_flag:
+                # 有左边界时，使用左边界偏移
+                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 15
+            else:
+                # 左边界丢失时，使用上次左边界位置
+                Trk.middle_sideline1 = Trk.left_sideline1_last + (CCD1_SET_WIDTH / 2) + 15
 
         elif ring_state == OUT_RING:
             # 出环岛阶段：按近端CCD1右边界巡线
@@ -965,7 +967,7 @@ def ring_detection():
             pass
             
     elif ring_state == FIND_RING and ring_left:
-        # 阶段1→2：左环岛确认
+        # 阶段1→2：左环岛确认，准备进入环岛
         # 条件：编码器距离足够 + 远端左边界位置确认
         if (abs(ring_encoder - encoder_integral) > READY_IN_RING_ENCODER and 
             not CCD2_left_flag):  # 参考C代码为27阈值，修改为18
@@ -1016,56 +1018,9 @@ def ring_detection():
         ring_angle = 0
         set_beep_off()  # 停止蜂鸣器
 
-# 移除十字路口和坡道检测函数
-
-def track_width_analysis():
-    """基于赛道宽度的丢线判断"""
-    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
-    global Trk
-    
-    # 计算近端CCD的赛道半宽
-    if CCD1_left_flag and CCD1_right_flag:
-        # 双边都检测到时，计算实际半宽
-        left_width = abs(Trk.middle_sideline1 - Trk.left_sideline1)
-        right_width = abs(Trk.right_sideline1 - Trk.middle_sideline1)
-        
-        # 判断左边是否丢线（左边界距离中线过远）
-        if left_width > WIDE_TRACK_THRESHOLD:
-            CCD1_left_flag = False  # 标记为左丢线
-        
-        # 判断右边是否丢线（右边界距离中线过远）
-        if right_width > WIDE_TRACK_THRESHOLD:
-            CCD1_right_flag = False  # 标记为右丢线
-            
-        # 判断是否为十字（两边都很宽）
-        if left_width > VERY_WIDE_THRESHOLD and right_width > VERY_WIDE_THRESHOLD:
-            CCD1_left_flag = False
-            CCD1_right_flag = False
-    
-    # 计算远端CCD的赛道半宽
-    if CCD2_left_flag and CCD2_right_flag:
-        # 双边都检测到时，计算实际半宽
-        left_width2 = abs(Trk.middle_sideline2 - Trk.left_sideline2)
-        right_width2 = abs(Trk.right_sideline2 - Trk.middle_sideline2)
-        
-        # 判断左边是否丢线
-        if left_width2 > WIDE_TRACK_THRESHOLD:
-            CCD2_left_flag = False
-        
-        # 判断右边是否丢线
-        if right_width2 > WIDE_TRACK_THRESHOLD:
-            CCD2_right_flag = False
-            
-        # 判断是否为十字
-        if left_width2 > VERY_WIDE_THRESHOLD and right_width2 > VERY_WIDE_THRESHOLD:
-            CCD2_left_flag = False
-            CCD2_right_flag = False
 
 def element_detection():
-    """元素检测主函数 - 基于赛道宽度判断"""
-    # 基于赛道宽度的丢线重新判断
-    track_width_analysis()
-    
+    """元素检测主函数 - 直接使用边界检测算法结果"""
     # 环岛检测
     ring_detection()
 
@@ -1199,7 +1154,7 @@ def ccd_process(timer):
         if ccd_data_lower:
             lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
             
-        # 显示边界线和中线 - 基于新的宽度判断结果
+        # 显示边界线和中线 - 基于原始边界检测算法结果
         # ===== 远端CCD (上半部分) 的边界线和中线 =====
         # 画远端CCD左边界线 (红色) - 只有未丢线才显示
         if CCD2_left_flag and 0 <= Trk.left_sideline2 <= 127:
@@ -1233,18 +1188,18 @@ def ccd_process(timer):
         lcd.str12(0, 207, f"L2:{Trk.left_sideline2:3d} R2:{Trk.right_sideline2:3d} Dev:{line_deviation:4.1f}", 0xFFFF)
         
         # 第3行：两侧曲率和赛道宽度 (重点显示)
-        # 计算宽度时使用重新判断后的边界标志
+        # 计算宽度时使用原始边界检测结果
         left_width1 = abs(Trk.middle_sideline1 - Trk.left_sideline1) if CCD1_left_flag else 0
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：CCD1边界检测状态 (基于宽度重新判断后的结果)
+        # 第4行：CCD1边界检测状态 (基于原始边界检测算法)
         ccd1_status = ""
         ccd1_status += "L1:" + ("V" if CCD1_left_flag else "X")  # V=有效 X=丢线
         ccd1_status += " R1:" + ("V" if CCD1_right_flag else "X")
         lcd.str12(0, 231, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
         
-        # 第5行：CCD2边界检测状态 (基于宽度重新判断后的结果)
+        # 第5行：CCD2边界检测状态 (基于原始边界检测算法)
         ccd2_status = ""
         ccd2_status += "L2:" + ("V" if CCD2_left_flag else "X")
         ccd2_status += " R2:" + ("V" if CCD2_right_flag else "X")
@@ -1276,19 +1231,6 @@ def ccd_process(timer):
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
         lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir}{encoder_info} Key2:Clear", 0xF800)  # 红色
-        
-        # 第8行：赛道宽度分析状态
-        # 计算远端宽度
-        left_width2 = abs(Trk.middle_sideline2 - Trk.left_sideline2) if CCD2_left_flag else 0
-        right_width2 = abs(Trk.right_sideline2 - Trk.middle_sideline2) if CCD2_right_flag else 0
-        width_status = ""
-        if max(left_width1, right_width1) > VERY_WIDE_THRESHOLD:
-            width_status = "CROSS"
-        elif max(left_width1, right_width1) > WIDE_TRACK_THRESHOLD:
-            width_status = "WIDE"
-        else:
-            width_status = "NORM"
-        lcd.str12(0, 279, f"Width2:{left_width2:.0f}/{right_width2:.0f} Status:{width_status}", 0x07E0)  # 绿色
         
     except:
         # 显示出错也要尝试显示基本信息
