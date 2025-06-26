@@ -297,22 +297,22 @@ speed_Ki = 0
 speed_Kd = 3.98
 
 # 线路跟踪PD控制器参数
-line_kp = 9.9 # 比例控制，快速响应
-line_kd = 70  # 微分控制，提高稳定性
+line_kp = 10 # 比例控制，快速响应
+line_kd = 100  # 微分控制，提高稳定性
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 20  # 设置小的前进速度进行测试
+TARGET_SPEED = 30  # 设置小的前进速度进行测试
 ticker_count = 0
 
-# WiFi调参数据存储 - 前四个通道改为CCD阈值参数
-wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, speed_Kp, line_kd, speed_Kd, line_kp]
+# WiFi调参数据存储 - 前三个通道改为线路跟踪参数
+wifi_data = [line_kp, line_kd, TARGET_SPEED, THRESHOLD_2, speed_Kp, 0, speed_Kd, 0]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
-    global THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2
-    global speed_Kp, line_kd, speed_Kd, line_kp
+    global line_kp, line_kd, TARGET_SPEED, THRESHOLD_2
+    global speed_Kp, speed_Kd
     global pid_speed, pid_line, wifi_data, motor1, motor2
     
     if not wifi_enabled:
@@ -327,25 +327,17 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新CCD阈值参数 (前4个通道)
-        new_threshold_1 = int(wifi_data[0])  # 转换为整数
-        THRESHOLD_MULTIPLE_2 = int(wifi_data[1])  # 转换为整数
-        THRESHOLD_1 = int(wifi_data[2])           # 转换为整数
-        THRESHOLD_2 = int(wifi_data[3])           # 转换为整数
-        
-        # 更新原始阈值和当前阈值
-        global original_threshold_1, THRESHOLD_MULTIPLE_1
-        original_threshold_1 = new_threshold_1
-        # 如果当前不在环岛状态，直接更新当前阈值
-        if ring_state == NO_RING or ring_state == FIND_RING or ring_state == OUT_RING:
-            THRESHOLD_MULTIPLE_1 = new_threshold_1
-        # 如果在环岛内部状态，保持低阈值不变
+        # 更新线路跟踪参数 (前3个通道)
+        line_kp = wifi_data[0]          # 巡线比例控制
+        line_kd = wifi_data[1]          # 巡线微分控制
+        TARGET_SPEED = wifi_data[2]     # 目标速度
+        THRESHOLD_2 = int(wifi_data[3]) # 保留一个阈值参数
         
         # 更新控制参数 (后4个通道)
         speed_Kp = wifi_data[4]
-        line_kd = wifi_data[5]
+        # wifi_data[5] 预留
         speed_Kd = wifi_data[6]
-        line_kp = wifi_data[7]
+        # wifi_data[7] 预留
         
         # 更新PID控制器参数
         pid_speed.kp = speed_Kp
@@ -355,10 +347,10 @@ def update_wifi_parameters():
         pid_line.kp = line_kp
         pid_line.kd = line_kd
         
-        # 发送示波器数据 - 显示CCD阈值和控制输出
+        # 发送示波器数据 - 显示巡线控制相关信息
         wifi.send_oscilloscope(
-            Trk.left_qulu, Trk.right_qulu, line_deviation, 
-            THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, line_control_output)
+            line_kp, line_kd, TARGET_SPEED, 
+            line_deviation, line_control_output, Trk.left_qulu, Trk.right_qulu, motor1)
     
     except:
         pass
