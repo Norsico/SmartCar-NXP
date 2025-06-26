@@ -912,16 +912,23 @@ def middle_sideline():
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
     
     # 环岛中线特殊处理 - 参考C代码逻辑
-    if ring_state == FIND_RING or ring_state == OUT_RING:
-        # 进入环岛和出环岛阶段：使用固定偏移策略
-        if ring_left:
-            # 左环岛：基于右边界偏移计算中线
+    # 左环岛处理
+    if ring_left:
+        if ring_state == FIND_RING:
+            # 进入环岛阶段：基于右边界偏移计算中线
             Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
-    elif ring_state == READY_OUT_RING or ring_state == IN_RING:
-        # 环岛内部阶段：使用另一种偏移策略
-        if ring_left:
-            # 左环岛：基于左边界偏移计算中线
-            Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2)
+        elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
+            # 环岛内部阶段：基于左边界偏移计算中线
+            Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 15
+
+        elif ring_state == OUT_RING:
+            # 出环岛阶段：按近端CCD1右边界巡线
+            if CCD1_right_flag:
+                # 有右边界时，按右边界偏移计算中线
+                Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
+            else:
+                # 右边界也丢失时，保持上次中线
+                pass
     
     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
     # if cross_flag:
@@ -951,16 +958,6 @@ def ring_detection():
             set_beep_short()  # 发现环岛：短响一声
             ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
             
-        # 检测右环岛
-        # 条件：近端CCD右侧丢线 + 左边界存在 + 左侧曲率小 + 远端不是全黑
-        elif (CCD1_left_flag and not CCD1_right_flag and 
-              Trk.left_qulu <= RING_QULU_THRESHOLD and not black_write_2):
-            ring_state = FIND_RING
-            ring_left = False
-            ring_right = True
-            set_beep_short()  # 发现环岛：短响一声
-            ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
-            
         # 如果同时检测到十字（双侧丢线），排除环岛误判
         if (not CCD1_left_flag and not CCD1_right_flag and 
             not black_write_2 and not black_write_1):
@@ -971,34 +968,53 @@ def ring_detection():
         # 阶段1→2：左环岛确认
         # 条件：编码器距离足够 + 远端左边界位置确认
         if (abs(ring_encoder - encoder_integral) > READY_IN_RING_ENCODER and 
-            Trk.left_sideline2 < 18):  # 参考C代码为27阈值，修改为18
+            not CCD2_left_flag):  # 参考C代码为27阈值，修改为18
             ring_state = READY_IN_RING
             set_beep_double_short()  # 确认环岛：短响两声
-            ring_angle = imu_data_obj.Total_Yaw  # 记录当前角度
-
             
         elif Trk.right_qulu > 30:  # 右侧曲率过大，可能是误判
             ring_state = NO_RING
             ring_left = False
             
-    elif ring_state == FIND_RING and ring_right:
-        # 阶段1→2：右环岛确认  
-        # 条件：编码器距离足够 + 远端右边界位置确认
-        if (abs(ring_encoder - encoder_integral) > READY_IN_RING_ENCODER and 
-            Trk.right_sideline2 > 100):  # 右环岛的远端右边界应该靠右
-            ring_state = READY_IN_RING
-            set_beep_double_short()  # 确认环岛：短响两声
-            ring_angle = imu_data_obj.Total_Yaw  # 记录当前角度
-
-            
-        elif Trk.left_qulu > 30:  # 左侧曲率过大，可能是误判
-            ring_state = NO_RING
-            ring_right = False
-            
     elif ring_state == READY_IN_RING:
-        # 准备进入环岛状态 - 暂时保持，等待下一个状态
-        # 这里可以设置环岛的特殊PID参数
-        pass
+        # 阶段2→3：准备进入环岛 -> 在环岛中
+        # 条件：编码器距离足够（走了足够远开始执行环岛策略）
+        if abs(ring_encoder - encoder_integral) > IN_RING_ENCODER:
+            ring_state = IN_RING
+            set_beep_long()  # 进入环岛：长响一声
+                
+    elif ring_state == IN_RING:
+        # 阶段3→4：在环岛中 -> 准备出环岛
+        # 条件：近端CCD1双边都丢线（表示即将出环岛）
+        if abs(Trk.left_sideline1 - Trk.right_sideline1) > 80:
+            ring_state = READY_OUT_RING
+            ring_encoder = encoder_integral  # 重新记录编码器值用于出环岛阶段
+            set_beep_short()  # 准备出环岛：短响一声
+                
+    elif ring_state == READY_OUT_RING:
+        # 阶段4→5：准备出环岛 -> 出环岛
+        # 条件：近端CCD1重新检测到边界（出环岛开始）
+        if CCD1_right_flag:
+            ring_state = OUT_RING
+            ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
+            set_beep_long()  # 出环岛：长响一声
+
+                
+    elif ring_state == OUT_RING:
+        # 阶段5→6：出环岛 -> 准备回到无环岛
+        # 条件：编码器距离足够（出环岛后走了足够远）
+        if abs(ring_encoder - encoder_integral) > NO_RING_ENCODER:
+            ring_state = READY_NO_RING
+            
+    elif ring_state == READY_NO_RING:
+        # 阶段6→0：准备回到无环岛 -> 无环岛
+        # 直接清除所有环岛标志
+        ring_state = NO_RING
+        ring_left = False
+        ring_right = False
+        ring_encoder = 0
+        ring_angle = 0
+        set_beep_off()  # 停止蜂鸣器
 
 # 移除十字路口和坡道检测函数
 
@@ -1056,16 +1072,15 @@ def element_detection():
 
 def clear_ring_flag():
     """清除环岛标志位"""
-    global ring_state, ring_left, ring_right, ring_encoder, ring_angle
-    global beep_double_count, encoder_integral
+    global ring_state, ring_left, ring_right, ring_encoder
+    global beep_double_count
     ring_state = NO_RING
     ring_left = False
     ring_right = False
     ring_encoder = 0
-    ring_angle = 0
-    encoder_integral = 0
     beep_double_count = 0
     set_beep_off()  # 设置停止蜂鸣器标志
+    # 注意：不清零encoder_integral，保持全局距离累积
 
 def ccd_processing(ccd_data1, ccd_data2):
     """CCD主处理函数 - 移植自C语言示例"""
@@ -1246,6 +1261,10 @@ def ccd_process(timer):
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "FOUND"
         elif ring_state == READY_IN_RING: ring_status = "READY"
+        elif ring_state == IN_RING: ring_status = "IN_RING"
+        elif ring_state == READY_OUT_RING: ring_status = "READY_OUT"
+        elif ring_state == OUT_RING: ring_status = "OUT_RING"
+        elif ring_state == READY_NO_RING: ring_status = "READY_NO"
         
         ring_dir = ""
         if ring_left: ring_dir = "L"
