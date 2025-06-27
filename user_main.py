@@ -46,8 +46,8 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 30  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 35  # 远端适中
+THRESHOLD_MULTIPLE_1 = 38  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 38  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -72,10 +72,10 @@ ring_right = False
 
 # 环岛阈值调整
 original_threshold_1 = THRESHOLD_MULTIPLE_1  # 保存原始阈值
-ring_threshold_1 = 17  # 环岛内部使用的较小阈值
+ring_threshold_1 = 18  # 环岛内部使用的较小阈值
 
 # 环岛检测阈值 - 参考C代码调整
-RING_QULU_THRESHOLD = 5  # 环岛曲率检测阈值（参考代码使用12）
+RING_QULU_THRESHOLD = 7  # 环岛曲率检测阈值（参考代码使用12）
 
 # 环岛各阶段参数 - 需要根据实际测试调整
 READY_IN_RING_ENCODER = 32     # 进入环岛前的编码器距离（增大，因为积分值会更大）
@@ -91,6 +91,16 @@ RING_90 = False
 encoder_integral = 0
 ring_encoder = 0        # 环岛编码器计数
 ring_angle = 0          # 环岛角度计数
+
+# 十字路口相关全局变量
+cross_flag = False      # 十字路口标志
+cross_encoder = 0       # 十字路口编码器计数
+cross_delay_encoder = 0 # 环岛结束后的延时编码器值
+cross_middle_line = 63.0  # 检测到十字路口时保存的中线值
+
+# 十字路口参数 - 需要调试优化
+CROSS_ENCODER = 30      # 十字路口编码器距离阈值（参考值）
+CROSS_DELAY = 40        # 环岛结束后延时距离，避免误检测
 
 # CCD信息类
 class CCDInformation:
@@ -882,7 +892,7 @@ def ccd_curvature_calc():
 def middle_sideline():
     """中线计算 - 包含环岛特殊处理逻辑"""
     global Trk, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
-    global ring_state, ring_left, ring_right
+    global ring_state, ring_left, ring_right, cross_flag
     
     # 基础中线计算
     # CCD1中线计算 - 主要巡线传感器，考虑丢线情况
@@ -911,9 +921,16 @@ def middle_sideline():
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
     
+    # 十字路口中线特殊处理 - 参考C代码注释
+    # 十字路口期间，使用检测到十字路口时保存的中线值直行通过
+    # 不再动态调整方向，避免受到CCD丢线影响
+    if cross_flag:
+        # 十字路口状态下，直接使用保存的中线值直行
+        Trk.middle_sideline1 = cross_middle_line
+    
     # 环岛中线特殊处理 - 参考C代码逻辑
     # 左环岛处理
-    if ring_left:
+    elif ring_left:
         if ring_state == FIND_RING:
             # 进入环岛阶段：基于右边界偏移计算中线
             Trk.middle_sideline1 = Trk.right_sideline1 - (CCD1_SET_WIDTH / 2)
@@ -921,10 +938,10 @@ def middle_sideline():
             # 环岛内部阶段：基于左边界偏移计算中线（短响两声后立即切换到左侧巡线）
             if CCD1_left_flag:
                 # 有左边界时，使用左边界偏移
-                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 10
+                Trk.middle_sideline1 = Trk.left_sideline1 + (CCD1_SET_WIDTH / 2) + 8
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + (CCD1_SET_WIDTH / 2) + 10
+                Trk.middle_sideline1 = Trk.left_sideline1_last + (CCD1_SET_WIDTH / 2) + 8
 
         elif ring_state == OUT_RING:
             # 出环岛阶段：按近端CCD1右边界巡线
@@ -978,7 +995,7 @@ def ring_detection():
     if ring_state == NO_RING:
         # 检测左环岛
         # 条件：近端CCD左侧丢线 + 右边界存在 + 右侧曲率小 + 远端不是全黑
-        if (not CCD1_left_flag and CCD1_right_flag and 
+        if (not CCD1_left_flag and Trk.right_sideline1 < 95 and 
             Trk.right_qulu <= RING_QULU_THRESHOLD and not black_write_2):
             ring_state = FIND_RING
             ring_left = True
@@ -988,7 +1005,7 @@ def ring_detection():
             
         # 检测右环岛
         # 条件：近端CCD右侧丢线 + 左边界存在 + 左侧曲率小 + 远端不是全黑
-        elif (not CCD1_right_flag and CCD1_left_flag and 
+        elif (not CCD1_right_flag and CCD1_left_flag and Trk.left_sideline1 > 40 and
               Trk.left_qulu <= RING_QULU_THRESHOLD and not black_write_2):
             ring_state = FIND_RING
             ring_left = False
@@ -1043,14 +1060,14 @@ def ring_detection():
         if Trk.left_sideline2 < 27:
             ring_state = READY_IN_RING
             set_beep_double_short()  # 确认环岛：短响两声
-            # 降低近端CCD阈值，提高边界检测灵敏度
+            # 只降低近端CCD1阈值，提高边界检测灵敏度
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = ring_threshold_1
             
         elif abs(ring_encoder - encoder_integral) > 50:  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_left = False
-            # 恢复近端CCD原始阈值
+            # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
@@ -1061,14 +1078,14 @@ def ring_detection():
         if Trk.right_sideline2 > 100:
             ring_state = READY_IN_RING
             set_beep_double_short()  # 确认环岛：短响两声
-            # 降低近端CCD阈值，提高边界检测灵敏度
+            # 只降低近端CCD1阈值，提高边界检测灵敏度
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = ring_threshold_1
             
         elif abs(ring_encoder - encoder_integral) > 50:  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_right = False
-            # 恢复近端CCD原始阈值
+            # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
@@ -1085,7 +1102,7 @@ def ring_detection():
             ring_state = NO_RING
             ring_left = False
             ring_right = False
-            # 恢复近端CCD原始阈值
+            # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
                 
@@ -1093,7 +1110,7 @@ def ring_detection():
         # 阶段3→4：在环岛中 -> 准备出环岛
         # 条件：近端CCD1双边都丢线（表示即将出环岛）
         if abs(Trk.left_sideline1 - Trk.right_sideline1) > 80 and not CCD2_left_flag and not CCD2_right_flag:
-            # 恢复近端CCD原始阈值
+            # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             ring_state = READY_OUT_RING
@@ -1120,7 +1137,7 @@ def ring_detection():
         # 条件：编码器距离足够（出环岛后走了足够远）
         if abs(ring_encoder - encoder_integral) > NO_RING_ENCODER:
             ring_state = READY_NO_RING
-            # 恢复近端CCD原始阈值
+            # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
@@ -1132,26 +1149,108 @@ def ring_detection():
         ring_right = False
         ring_encoder = 0
         ring_angle = 0
+        
+        # 记录环岛结束时的编码器值，用于延时
+        global cross_delay_encoder
+        cross_delay_encoder = encoder_integral
+        
         set_beep_off()  # 停止蜂鸣器
+
+
+def cross_detection():
+    """十字路口检测 - 移植自C语言参考代码"""
+    global cross_flag, cross_encoder, encoder_integral
+    global CCD1_left_flag, CCD1_right_flag, black_write_1, black_write_2
+    global ring_state, ring_left, ring_right  # 添加环岛状态检查
+    global cross_delay_encoder  # 添加延时检查
+    
+    # 检查环岛结束后的延时
+    # 如果刚结束环岛，需要等待一段距离后才能检测十字路口
+    ring_end_delay_ok = (cross_delay_encoder == 0 or 
+                        abs(encoder_integral - cross_delay_encoder) > CROSS_DELAY)
+    
+    # 十字路口检测条件：
+    # 1. 当前没有环岛状态（避免出环岛时误判为十字路口）
+    # 2. 环岛结束后已经等待足够距离
+    # 3. 近端CCD双边都丢线或赛道很窄
+    # 4. 远端CCD赛道很宽（表示前方有分叉）
+    # 5. 前后端都不是黑色场景
+    # 6. 当前没有十字路口标志
+    if (ring_state == NO_RING and  # 关键：只有在无环岛状态时才检测十字路口
+        not ring_left and not ring_right and  # 确保没有环岛标志
+        ring_end_delay_ok and  # 环岛结束后延时检查
+        Trk.left_sideline2 < 17 and Trk.right_sideline2 > 102 and
+        abs(Trk.left_sideline1 - Trk.right_sideline1) < 50 and 
+        abs(Trk.left_sideline2 - Trk.right_sideline2) > 90 and 
+        not black_write_1 and not black_write_2 and
+        not cross_flag):
+        
+        # 检测到十字路口
+        cross_flag = True
+        set_beep_long()  # 十字路口：长响
+        
+        # 保存检测到十字路口时的中线值，后续直行使用
+        global cross_middle_line
+        cross_middle_line = Trk.middle_sideline1
+        
+        # 记录当前编码器值（参考C代码：encoder_integral=100）
+        # 这里保持当前积分值，记录检测点
+        cross_encoder = encoder_integral
+        
+    # 十字路口退出条件：
+    # 走过足够距离后清除十字路口标志
+    if cross_flag and abs(cross_encoder - encoder_integral) > CROSS_ENCODER:
+        # 退出十字路口状态
+        cross_flag = False
+        set_beep_off()  # 停止蜂鸣器
+        
+        # 重置编码器计数（参考C代码逻辑）
+        cross_encoder = 0
+        
+        # 重置保存的中线值
+        global cross_middle_line
+        cross_middle_line = 63.0
 
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
-    # 环岛检测
-    ring_detection()
+    # 元素检测优先级：参考C代码的element()函数逻辑
+    # 1. 优先处理环岛（环岛状态不为NO_RING时）
+    # 2. 只有在完全无环岛状态时才检测十字路口
+    # 3. 避免出环岛时误判为十字路口
+    # 4. 十字路口期间不检测环岛，避免误判
+    
+    # 环岛检测和处理 - 只有在非十字路口状态时才进行
+    if not cross_flag:  # 十字路口期间不检测环岛
+        ring_detection()
+    
+    # 十字路口检测 - 只有在完全无环岛状态且无环岛标志时才检测
+    # 这样可以避免出环岛阶段的误判
+    if (ring_state == NO_RING and not ring_left and not ring_right):
+        cross_detection()
 
 
 def clear_ring_flag():
-    """清除环岛标志位"""
+    """清除环岛和十字路口标志位"""
     global ring_state, ring_left, ring_right, ring_encoder
+    global cross_flag, cross_encoder, cross_delay_encoder, cross_middle_line
     global beep_double_count, THRESHOLD_MULTIPLE_1, original_threshold_1
+    
+    # 清除环岛标志
     ring_state = NO_RING
     ring_left = False
     ring_right = False
     ring_encoder = 0
     beep_double_count = 0
+    
+    # 清除十字路口标志
+    cross_flag = False
+    cross_encoder = 0
+    cross_delay_encoder = 0  # 重置延时编码器
+    cross_middle_line = 63.0  # 重置保存的中线值
+    
     set_beep_off()  # 设置停止蜂鸣器标志
-    # 恢复近端CCD原始阈值
+    # 恢复近端CCD1原始阈值
     THRESHOLD_MULTIPLE_1 = original_threshold_1
     # 注意：不清零encoder_integral，保持全局距离累积
 
@@ -1311,25 +1410,31 @@ def ccd_process(timer):
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：CCD1边界检测状态 (基于原始边界检测算法)
+        # 第4行：CCD阈值状态显示
+        threshold_status = f"T1:{THRESHOLD_MULTIPLE_1} T2:{THRESHOLD_MULTIPLE_2}"
+        if THRESHOLD_MULTIPLE_1 == ring_threshold_1:
+            threshold_status += " (Ring-T1)"
+        lcd.str12(0, 231, threshold_status, 0xFFE0)  # 黄色
+        
+        # 第5行：CCD1边界检测状态 (基于原始边界检测算法)
         ccd1_status = ""
         ccd1_status += "L1:" + ("V" if CCD1_left_flag else "X")  # V=有效 X=丢线
         ccd1_status += " R1:" + ("V" if CCD1_right_flag else "X")
-        lcd.str12(0, 231, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
+        lcd.str12(0, 243, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
         
-        # 第5行：CCD2边界检测状态 (基于原始边界检测算法)
+        # 第6行：CCD2边界检测状态 (基于原始边界检测算法)
         ccd2_status = ""
         ccd2_status += "L2:" + ("V" if CCD2_left_flag else "X")
         ccd2_status += " R2:" + ("V" if CCD2_right_flag else "X")
-        lcd.str12(0, 243, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
+        lcd.str12(0, 255, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
         
-        # 第6行：黑白场景检测 (重点显示)
+        # 第7行：黑白场景检测 (重点显示)
         black_status = ""
         black_status += "B1:" + ("Y" if black_write_1 else "N")
         black_status += " B2:" + ("Y" if black_write_2 else "N")
-        lcd.str12(0, 255, f"Black {black_status}", 0xFFE0)  # 黄色
+        lcd.str12(0, 267, f"Black {black_status}", 0xFFE0)  # 黄色
         
-        # 第7行：环岛状态显示
+        # 第8行：环岛状态显示
         ring_status = ""
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "FOUND"
@@ -1349,13 +1454,27 @@ def ccd_process(timer):
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 267, f"Ring:{ring_status}{ring_dir}{encoder_info} Key2:Clear", 0xF800)  # 红色
+        lcd.str12(0, 279, f"Ring:{ring_status}{ring_dir}{encoder_info} Key2:Clear", 0xF800)  # 红色
         
+        # 第9行：十字路口状态显示
+        cross_status = "Cross:ON" if cross_flag else "Cross:OFF"
+        cross_info = ""
+        if cross_flag:
+            cross_info = f" E:{abs(cross_encoder - encoder_integral):.0f} M:{cross_middle_line:.1f}"
+        
+        # 显示环岛结束后的延时状态
+        delay_info = ""
+        if cross_delay_encoder > 0:
+            delay_distance = abs(encoder_integral - cross_delay_encoder)
+            if delay_distance < CROSS_DELAY:
+                delay_info = f" Delay:{CROSS_DELAY - delay_distance:.0f}"
+        
+        lcd.str12(0, 291, f"{cross_status}{cross_info}{delay_info}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
-            lcd.str12(0, 267, f"Ring:ERROR Key2:Clear", 0xF800)
-            lcd.str12(0, 279, f"System:Display Error", 0xF800)
+            lcd.str12(0, 279, f"Ring:ERROR Key2:Clear", 0xF800)
+            lcd.str12(0, 291, f"System:Display Error", 0xF800)
         except:
             pass
 
