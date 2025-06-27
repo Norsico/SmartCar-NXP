@@ -7,7 +7,10 @@ import time
 import math
 
 # wifi开关
-wifi_en = False 
+wifi_en = True 
+
+# 元素识别开关 - 关闭后只巡线不检测元素
+element_en = False  # False: 只巡线，True: 检测元素
 
 if wifi_en:
     # WiFi调参初始化
@@ -313,7 +316,7 @@ line_kd = 100  # 微分控制，提高稳定性
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 30  # 设置小的前进速度进行测试
+TARGET_SPEED = 60  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 前三个通道改为线路跟踪参数
@@ -921,6 +924,10 @@ def middle_sideline():
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
     
+    # 元素识别关闭时，跳过所有特殊中线处理，只使用基础中线
+    if not element_en:
+        return
+    
     # 十字路口中线特殊处理 - 参考C代码注释
     # 十字路口期间，使用检测到十字路口时保存的中线值直行通过
     # 不再动态调整方向，避免受到CCD丢线影响
@@ -1214,6 +1221,10 @@ def cross_detection():
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
+    # 检查元素识别开关
+    if not element_en:
+        return  # 元素识别关闭，直接返回
+    
     # 元素检测优先级：参考C代码的element()函数逻辑
     # 1. 优先处理环岛（环岛状态不为NO_RING时）
     # 2. 只有在完全无环岛状态时才检测十字路口
@@ -1328,10 +1339,22 @@ def ccd_process(timer):
     try:
         key_data = key.get()
         
-        # 检查key2短按 (按键2对应索引1)
+        # 检查key2短按 (按键2对应索引1) - 清除环岛标志位
         if key_data[1] == 1:  # 短按
             clear_ring_flag()  # 清除环岛标志位
             key.clear(2)  # 清除按键状态
+            
+        # 检查key1短按 (按键1对应索引0) - 切换元素识别开关
+        if key_data[0] == 1:  # 短按
+            global element_en
+            element_en = not element_en  # 切换开关状态
+            if element_en:
+                set_beep_short()  # 开启元素识别：短响
+            else:
+                set_beep_double_short()  # 关闭元素识别：双短响
+                # 关闭元素识别时清除所有元素标志
+                clear_ring_flag()
+            key.clear(1)  # 清除按键状态
     except:
         pass  # 按键处理出错不影响主要功能
     
@@ -1454,7 +1477,7 @@ def ccd_process(timer):
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 279, f"Ring:{ring_status}{ring_dir}{encoder_info} Key2:Clear", 0xF800)  # 红色
+        lcd.str12(0, 279, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
         # 第9行：十字路口状态显示
         cross_status = "Cross:ON" if cross_flag else "Cross:OFF"
@@ -1470,6 +1493,10 @@ def ccd_process(timer):
                 delay_info = f" Delay:{CROSS_DELAY - delay_distance:.0f}"
         
         lcd.str12(0, 291, f"{cross_status}{cross_info}{delay_info}", 0x07FF)  # 青色
+        
+        # 第10行：元素识别开关状态显示
+        element_status = "Element:ON" if element_en else "Element:OFF"
+        lcd.str12(0, 303, element_status, 0xF81F)  # 紫色
     except:
         # 显示出错也要尝试显示基本信息
         try:
