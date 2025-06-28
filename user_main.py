@@ -316,17 +316,17 @@ line_kd = 100  # 微分控制，提高稳定性
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 60  # 设置小的前进速度进行测试
+TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
 
-# WiFi调参数据存储 - 前三个通道改为线路跟踪参数
-wifi_data = [line_kp, line_kd, TARGET_SPEED, THRESHOLD_2, speed_Kp, 0, speed_Kd, 0]
+# WiFi调参数据存储 - 改为平衡车控制参数
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, med_roll_angle]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
-    global line_kp, line_kd, TARGET_SPEED, THRESHOLD_2
-    global speed_Kp, speed_Kd
-    global pid_speed, pid_line, wifi_data, motor1, motor2
+    global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
+    global speed_Kp, speed_Ki, speed_Kd, med_roll_angle
+    global pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
     
     if not wifi_enabled:
         return
@@ -340,30 +340,31 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新线路跟踪参数 (前3个通道)
-        line_kp = wifi_data[0]          # 巡线比例控制
-        line_kd = wifi_data[1]          # 巡线微分控制
-        TARGET_SPEED = wifi_data[2]     # 目标速度
-        THRESHOLD_2 = int(wifi_data[3]) # 保留一个阈值参数
-        
-        # 更新控制参数 (后4个通道)
-        speed_Kp = wifi_data[4]
-        # wifi_data[5] 预留
-        speed_Kd = wifi_data[6]
-        # wifi_data[7] 预留
+        # 更新平衡车控制参数
+        angle_kp = wifi_data[0]         # 角速度环比例控制
+        angle_kd = wifi_data[1]         # 角速度环微分控制
+        roll_angle_Kp = wifi_data[2]    # 角度环比例控制
+        roll_angle_Kd = wifi_data[3]    # 角度环微分控制
+        speed_Kp = wifi_data[4]         # 速度环比例控制
+        speed_Ki = wifi_data[5]         # 速度环积分控制
+        speed_Kd = wifi_data[6]         # 速度环微分控制
+        med_roll_angle = wifi_data[7]   # 平衡角度
         
         # 更新PID控制器参数
+        pid_angle_speed.kp = angle_kp
+        pid_angle_speed.kd = angle_kd
+        
+        pid_angle.kp = roll_angle_Kp
+        pid_angle.kd = roll_angle_Kd
+        
         pid_speed.kp = speed_Kp
+        pid_speed.ki = speed_Ki
         pid_speed.kd = speed_Kd
         
-        # 更新巡线PD控制器参数
-        pid_line.kp = line_kp
-        pid_line.kd = line_kd
-        
-        # 发送示波器数据 - 显示巡线控制相关信息
+        # 发送示波器数据 - 显示平衡车控制相关信息
         wifi.send_oscilloscope(
-            line_kp, line_kd, TARGET_SPEED, 
-            line_deviation, line_control_output, Trk.left_qulu, Trk.right_qulu, motor1)
+            angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd,
+            speed_Kp, speed_Ki, speed_Kd, med_roll_angle)
     
     except:
         pass
@@ -581,8 +582,8 @@ def control_loop(timer):
     motor2 = motor1
     
     # CCD巡线控制
-    motor1 -= line_control_output  # 左电机增加转向控制
-    motor2 += line_control_output  # 右电机减少转向控制
+    # motor1 -= line_control_output  # 左电机增加转向控制
+    # motor2 += line_control_output  # 右电机减少转向控制
     
     motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
