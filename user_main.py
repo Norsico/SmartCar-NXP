@@ -15,7 +15,7 @@ element_en = False  # False: 只巡线，True: 检测元素
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.71.9", "8086")
+        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -297,35 +297,35 @@ lcd.mode(2)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1853
+angle_kp = -1869 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd =55
+angle_kd =-180
 
-roll_angle_Kp = 0.094
+roll_angle_Kp = 0.188 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0855  # 进一步增强角度环响应
+roll_angle_Kd = 0.1113 #0.0826 
 
-speed_Kp = 0.098
-speed_Ki = 0
-speed_Kd = 3.98
+speed_Kp = 0.051 #0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Ki = 1.8E-06#4E-06 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
+speed_Kd = 1.534 #1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数
-line_kp = 10 # 比例控制，快速响应
-line_kd = 100  # 微分控制，提高稳定性
+line_kp = 10.95 #这里还是要修改循迹的 感觉还是要配合远端摄像头 不然前瞻小了 速度上不去 130就走不了 降速是可以的
+line_kd = 161.9  #就近端前瞻的话 这东西速度快了 直接走当面前才反应 然后你懂的坠机了开始打转
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 34.1  # 调整平衡角度
-TARGET_SPEED = 0  # 设置小的前进速度进行测试
+med_roll_angle = 37.35  # 调整平衡角度
+TARGET_SPEED = 130  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车控制参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, med_roll_angle]
+wifi_data = [line_kp, line_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
-    global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Ki, speed_Kd, med_roll_angle
+    global line_kp, line_kd, roll_angle_Kp, roll_angle_Kd
+    global speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED
     global pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
     
     if not wifi_enabled:
@@ -341,18 +341,18 @@ def update_wifi_parameters():
                 wifi_data[i] = wifi.get_data(i)
         
         # 更新平衡车控制参数
-        angle_kp = wifi_data[0]         # 角速度环比例控制
-        angle_kd = wifi_data[1]         # 角速度环微分控制
+        line_kp = wifi_data[0]         # 角速度环比例控制
+        line_kd = wifi_data[1]         # 角速度环微分控制
         roll_angle_Kp = wifi_data[2]    # 角度环比例控制
         roll_angle_Kd = wifi_data[3]    # 角度环微分控制
         speed_Kp = wifi_data[4]         # 速度环比例控制
         speed_Ki = wifi_data[5]         # 速度环积分控制
         speed_Kd = wifi_data[6]         # 速度环微分控制
-        med_roll_angle = wifi_data[7]   # 平衡角度
+        TARGET_SPEED = wifi_data[7]   # 平衡角度
         
         # 更新PID控制器参数
-        pid_angle_speed.kp = angle_kp
-        pid_angle_speed.kd = angle_kd
+        pid_line.kp = line_kp
+        pid_line.kd = line_kd
         
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
@@ -364,7 +364,7 @@ def update_wifi_parameters():
         # 发送示波器数据 - 显示平衡车控制相关信息
         wifi.send_oscilloscope(
             angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd,
-            speed_Kp, speed_Ki, speed_Kd, med_roll_angle)
+            speed_Kp, speed_Ki, imu_data_obj.gyro_x, imu_data_obj.Pitch)
     
     except:
         pass
@@ -463,7 +463,7 @@ def imu_process():
     imu_data_obj.gyro_z = (imu_data[5] - Filter_data[2]) * PI / 180 / 14.4
     
     # 加速度滤波 - 增加平滑性减少摆动
-    alpha = 0.35  # 进一步降低滤波系数，增加平滑性
+    alpha = 0.3  # 进一步降低滤波系数，增加平滑性
     imu_data_obj.acc_x = (imu_data[0] * alpha / 4096) + (imu_data_obj.acc_x * (1 - alpha))
     imu_data_obj.acc_y = (imu_data[1] * alpha / 4096) + (imu_data_obj.acc_y * (1 - alpha))
     imu_data_obj.acc_z = (imu_data[2] * alpha / 4096) + (imu_data_obj.acc_z * (1 - alpha))
@@ -567,13 +567,14 @@ def imu_init():
     
     for i in range(3):
         Filter_data[i] /= 1000
-
+count_time=0
 def control_loop(timer):
-    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output
+    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output,count_time
     
     ticker_flag = True
+    count_time = (count_time+1)%2000
     ticker_count = (ticker_count + 1) % 10
-    
+
     # 1ms: 角速度控制
     imu_data = imu.get()
     imu_process()
@@ -582,8 +583,8 @@ def control_loop(timer):
     motor2 = motor1
     
     # CCD巡线控制
-    # motor1 -= line_control_output  # 左电机增加转向控制
-    # motor2 += line_control_output  # 右电机减少转向控制
+    motor1 -= line_control_output  # 左电机增加转向控制
+    motor2 += line_control_output  # 右电机减少转向控制
     
     motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
@@ -592,14 +593,16 @@ def control_loop(timer):
     motor_r.duty(motor2)
     
     # 5ms: 角度控制
-    if ticker_count % 5 == 0:
-        angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
+    #if ticker_count % 5 == 0:
+    angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
     
     # 10ms: 速度控制
-    if ticker_count == 0:
+    if ticker_count == 5:
         avg_speed = (kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
         speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
+    if count_time == 0:
+        pid_speed.err_sum=0;
 
 def encoder_update(timer):
     global encoder_integral
@@ -1551,4 +1554,5 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
+
 
