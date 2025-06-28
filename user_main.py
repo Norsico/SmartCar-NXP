@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -15,7 +15,7 @@ element_en = False  # False: 只巡线，True: 检测元素
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.71.9", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -310,13 +310,13 @@ speed_Ki = 1.8E-06#4E-06 因为我觉得哈 这东西太大了会强迫快速到
 speed_Kd = 1.534 #1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数
-line_kp = 10.95 #这里还是要修改循迹的 感觉还是要配合远端摄像头 不然前瞻小了 速度上不去 130就走不了 降速是可以的
-line_kd = 161.9  #就近端前瞻的话 这东西速度快了 直接走当面前才反应 然后你懂的坠机了开始打转
+line_kp = 10.6 #这里还是要修改循迹的 感觉还是要配合远端摄像头 不然前瞻小了 速度上不去 130就走不了 降速是可以的
+line_kd = 100  #就近端前瞻的话 这东西速度快了 直接走当面前才反应 然后你懂的坠机了开始打转
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 37.35  # 调整平衡角度
-TARGET_SPEED = 130  # 设置小的前进速度进行测试
+TARGET_SPEED = 120  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车控制参数
