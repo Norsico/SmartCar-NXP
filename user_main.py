@@ -12,6 +12,8 @@ wifi_en = False
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
 
+MIDDLE_LINE = 65
+
 if wifi_en:
     # WiFi调参初始化
     try:
@@ -49,13 +51,13 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 38  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 38  # 远端适中
+THRESHOLD_MULTIPLE_1 = 30  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 30  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
 # - 值越小越容易判断为黑色场景
-THRESHOLD_1 = 30          # 二值化较松
+THRESHOLD_1 = 40          # 二值化较松
 THRESHOLD_2 = 40
 
 # 环岛状态定义 - 参考C代码的7阶段状态机
@@ -99,7 +101,7 @@ ring_angle = 0          # 环岛角度计数
 cross_flag = False      # 十字路口标志
 cross_encoder = 0       # 十字路口编码器计数
 cross_delay_encoder = 0 # 环岛结束后的延时编码器值
-cross_middle_line = 63.0  # 检测到十字路口时保存的中线值
+cross_middle_line = MIDDLE_LINE  # 检测到十字路口时保存的中线值
 
 # 十字路口参数 - 需要调试优化
 CROSS_ENCODER = 30      # 十字路口编码器距离阈值（参考值）
@@ -120,8 +122,8 @@ class TrackInformation:
         # CCD1(近端)原图像
         self.left_sideline1 = 0
         self.right_sideline1 = 0
-        self.middle_sideline1 = 63.0
-        self.middle_sideline1_last = 63.0
+        self.middle_sideline1 = MIDDLE_LINE
+        self.middle_sideline1_last = MIDDLE_LINE
         self.width1 = 0
         
         # CCD1历史边界值
@@ -131,8 +133,8 @@ class TrackInformation:
         # CCD2(远端)原图像
         self.left_sideline2 = 0
         self.right_sideline2 = 0
-        self.middle_sideline2 = 63.0
-        self.middle_sideline2_last = 63.0
+        self.middle_sideline2 = MIDDLE_LINE
+        self.middle_sideline2_last = MIDDLE_LINE
         self.width2 = 0
         
         # CCD2历史边界值
@@ -309,14 +311,18 @@ speed_Kp = 0.051 #0.063 老铁我发现这东西不能给大 给大了就容易�
 speed_Ki = 1.8E-06#4E-06 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
 speed_Kd = 1.534 #1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
-# 线路跟踪PD控制器参数
-line_kp = 10.6 #这里还是要修改循迹的 感觉还是要配合远端摄像头 不然前瞻小了 速度上不去 130就走不了 降速是可以的
-line_kd = 100  #就近端前瞻的话 这东西速度快了 直接走当面前才反应 然后你懂的坠机了开始打转
+# 线路跟踪PD控制器参数 - 参考C代码优化
+line_kp = 11  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kd = 120  # 减小微分系数，避免震荡（参考C代码的平滑控制）
+
+# 前瞻控制参数 - 新增
+line_preview_weight = 0.3  # 远端CCD前瞻权重
+line_current_weight = 0.7  # 近端CCD当前权重
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 37.35  # 调整平衡角度
-TARGET_SPEED = 120  # 设置小的前进速度进行测试
+TARGET_SPEED = 110  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车控制参数
@@ -326,6 +332,7 @@ def update_wifi_parameters():
     """更新WiFi调参数据"""
     global line_kp, line_kd, roll_angle_Kp, roll_angle_Kd
     global speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED
+    global line_preview_weight, line_current_weight  # 新增前瞻参数
     global pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
     
     if not wifi_enabled:
@@ -340,15 +347,20 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新平衡车控制参数
-        line_kp = wifi_data[0]         # 角速度环比例控制
-        line_kd = wifi_data[1]         # 角速度环微分控制
-        roll_angle_Kp = wifi_data[2]    # 角度环比例控制
-        roll_angle_Kd = wifi_data[3]    # 角度环微分控制
-        speed_Kp = wifi_data[4]         # 速度环比例控制
-        speed_Ki = wifi_data[5]         # 速度环积分控制
-        speed_Kd = wifi_data[6]         # 速度环微分控制
-        TARGET_SPEED = wifi_data[7]   # 平衡角度
+        # 更新巡线和平衡车控制参数
+        line_kp = wifi_data[0]              # 巡线比例控制
+        line_kd = wifi_data[1]              # 巡线微分控制
+        roll_angle_Kp = wifi_data[2]        # 角度环比例控制
+        roll_angle_Kd = wifi_data[3]        # 角度环微分控制
+        speed_Kp = wifi_data[4]             # 速度环比例控制
+        speed_Ki = wifi_data[5]             # 速度环积分控制
+        speed_Kd = wifi_data[6]             # 速度环微分控制
+        TARGET_SPEED = wifi_data[7]         # 目标速度
+        
+        # 计算前瞻权重（可以通过调参界面间接调整）
+        # 使用TARGET_SPEED来间接控制前瞻性：速度越高，前瞻性越强
+        line_preview_weight = min(0.5, TARGET_SPEED / 300.0)  # 最大前瞻权重0.5
+        line_current_weight = 1.0 - line_preview_weight
         
         # 更新PID控制器参数
         pid_line.kp = line_kp
@@ -361,10 +373,10 @@ def update_wifi_parameters():
         pid_speed.ki = speed_Ki
         pid_speed.kd = speed_Kd
         
-        # 发送示波器数据 - 显示平衡车控制相关信息
+        # 发送示波器数据 - 显示巡线和平衡车控制相关信息
         wifi.send_oscilloscope(
-            angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd,
-            speed_Kp, speed_Ki, imu_data_obj.gyro_x, imu_data_obj.Pitch)
+            line_deviation, line_control_output, imu_data_obj.gyro_x, imu_data_obj.Pitch,
+            speed_Kp, speed_Ki, roll_angle_Kp, roll_angle_Kd)
     
     except:
         pass
@@ -627,8 +639,8 @@ def encoder_update(timer):
 def ccd_image_init():
     """CCD图像初始化"""
     global Trk, CCD1, CCD2
-    Trk.middle_sideline1 = 63.0
-    Trk.middle_sideline2 = 63.0
+    Trk.middle_sideline1 = MIDDLE_LINE
+    Trk.middle_sideline2 = MIDDLE_LINE
     CCD1.bin_thrd = 0
     CCD2.bin_thrd = 0
 
@@ -861,7 +873,7 @@ def ccd_curvature_calc():
     """曲率计算 - 移植自C语言示例"""
     global Trk, CCD1_SET_WIDTH, CCD2_SET_WIDTH, straight, curve
     
-    center = 63.5  # 图像中心
+    center = MIDDLE_LINE  # 图像中心
     
     # 左边曲率计算
     if ((Trk.left_sideline1 <= center and Trk.left_sideline2 <= center) or 
@@ -1220,7 +1232,7 @@ def cross_detection():
         
         # 重置保存的中线值
         global cross_middle_line
-        cross_middle_line = 63.0
+        cross_middle_line = MIDDLE_LINE
 
 
 def element_detection():
@@ -1262,7 +1274,7 @@ def clear_ring_flag():
     cross_flag = False
     cross_encoder = 0
     cross_delay_encoder = 0  # 重置延时编码器
-    cross_middle_line = 63.0  # 重置保存的中线值
+    cross_middle_line = MIDDLE_LINE  # 重置保存的中线值
     
     set_beep_off()  # 设置停止蜂鸣器标志
     # 恢复近端CCD1原始阈值
@@ -1270,7 +1282,7 @@ def clear_ring_flag():
     # 注意：不清零encoder_integral，保持全局距离累积
 
 def ccd_processing(ccd_data1, ccd_data2):
-    """CCD主处理函数 - 移植自C语言示例"""
+    """CCD主处理函数 - 移植自C语言示例，优化巡线控制"""
     # 1. CCD数据获取和预处理
     ccd1_get(ccd_data1)  # 近端CCD
     ccd2_get(ccd_data2)  # 远端CCD
@@ -1287,19 +1299,33 @@ def ccd_processing(ccd_data1, ccd_data2):
     # 5. 中线计算
     middle_sideline()
     
-    # 返回融合后的中线偏差
-    center = 63.0  # 赛道中心
+    # 6. 智能偏差计算 - 参考C代码优化
+    center = MIDDLE_LINE # 赛道中心
     
-    # 双CCD融合策略 - CCD1主要巡线，CCD2主要元素检测
+    # 计算近端和远端偏差
+    deviation1 = Trk.middle_sideline1 - center  # 近端偏差（当前位置）
+    deviation2 = Trk.middle_sideline2 - center  # 远端偏差（前瞻位置）
+    
+    # 智能融合策略 - 参考C代码的控制逻辑
     if CCD1_left_flag or CCD1_right_flag:
-        # CCD1有任何边界有效，优先使用（因为CCD1是主要巡线传感器）
-        deviation = Trk.middle_sideline1 - center
+        # CCD1有边界，使用双CCD融合控制
+        if CCD2_left_flag and CCD2_right_flag and not cross_flag and ring_state == NO_RING:
+            # 正常情况：双CCD融合，增加前瞻性
+            # 参考C代码：error = Trk.middle_sideline1 - MIDDLE_LINE，但我们加入前瞻
+            deviation = deviation1 * line_current_weight + deviation2 * line_preview_weight
+        else:
+            # 特殊情况（环岛、十字等）：只用近端CCD，保持稳定
+            deviation = deviation1
     elif CCD2_left_flag and CCD2_right_flag:
-        # 仅当CCD1完全失效且CCD2双边有效时才使用CCD2
-        deviation = Trk.middle_sideline2 - center
+        # CCD1失效，使用CCD2
+        deviation = deviation2
     else:
-        # 都无效，保持上次偏差
-        deviation = line_deviation
+        # 都失效，保持上次偏差（添加衰减避免失控）
+        global line_deviation
+        deviation = line_deviation * 0.95  # 逐渐衰减，避免持续偏移
+    
+    # 偏差限制 - 参考舵机控制的限制策略
+    deviation = max(-50, min(50, deviation))
     
     return deviation
 
@@ -1378,11 +1404,22 @@ def ccd_process(timer):
             else:
                 line_deviation = new_deviation
                 
-            # 使用PD控制器计算线路控制输出
+            # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
             line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
             
+            # 自适应控制强度 - 参考舵机控制范围调整
+            # 舵机控制范围约为±450，转换为差速控制需要更大范围
+            max_control_output = 4500  # 基础最大输出
+            
+            # 根据速度和偏差动态调整控制强度
+            speed_factor = min(TARGET_SPEED / 100.0, 1.5)  # 速度系数
+            deviation_factor = min(abs(line_deviation) / 20.0, 1.2)  # 偏差系数
+            
+            # 动态最大输出 = 基础输出 × 速度系数 × 偏差系数
+            dynamic_max_output = max_control_output * speed_factor * deviation_factor
+            
             # 限制线路控制输出
-            line_control_output = limit(line_control_output, -3000, 3000)
+            line_control_output = limit(line_control_output, -dynamic_max_output, dynamic_max_output)
             
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
@@ -1437,31 +1474,37 @@ def ccd_process(timer):
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：CCD阈值状态显示
+        # 第4行：巡线控制参数显示 - 新增
+        lcd.str12(0, 231, f"LineKp:{line_kp:4.1f} LineKd:{line_kd:4.1f} Out:{line_control_output:.0f}", 0xFFE0)  # 黄色
+        
+        # 第5行：前瞻控制参数显示 - 新增  
+        lcd.str12(0, 243, f"Preview:{line_preview_weight:3.2f} Current:{line_current_weight:3.2f}", 0x07FF)  # 青色
+        
+        # 第6行：CCD阈值状态显示
         threshold_status = f"T1:{THRESHOLD_MULTIPLE_1} T2:{THRESHOLD_MULTIPLE_2}"
         if THRESHOLD_MULTIPLE_1 == ring_threshold_1:
             threshold_status += " (Ring-T1)"
-        lcd.str12(0, 231, threshold_status, 0xFFE0)  # 黄色
+        lcd.str12(0, 255, threshold_status, 0xFFE0)  # 黄色
         
-        # 第5行：CCD1边界检测状态 (基于原始边界检测算法)
+        # 第7行：CCD1边界检测状态 (基于原始边界检测算法)
         ccd1_status = ""
         ccd1_status += "L1:" + ("V" if CCD1_left_flag else "X")  # V=有效 X=丢线
         ccd1_status += " R1:" + ("V" if CCD1_right_flag else "X")
-        lcd.str12(0, 243, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
+        lcd.str12(0, 267, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
         
-        # 第6行：CCD2边界检测状态 (基于原始边界检测算法)
+        # 第8行：CCD2边界检测状态 (基于原始边界检测算法)
         ccd2_status = ""
         ccd2_status += "L2:" + ("V" if CCD2_left_flag else "X")
         ccd2_status += " R2:" + ("V" if CCD2_right_flag else "X")
-        lcd.str12(0, 255, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
+        lcd.str12(0, 279, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
         
-        # 第7行：黑白场景检测 (重点显示)
+        # 第9行：黑白场景检测 (重点显示)
         black_status = ""
         black_status += "B1:" + ("Y" if black_write_1 else "N")
         black_status += " B2:" + ("Y" if black_write_2 else "N")
-        lcd.str12(0, 267, f"Black {black_status}", 0xFFE0)  # 黄色
+        lcd.str12(0, 291, f"Black {black_status}", 0xFFE0)  # 黄色
         
-        # 第8行：环岛状态显示
+        # 第10行：环岛状态显示
         ring_status = ""
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "FOUND"
@@ -1481,9 +1524,9 @@ def ccd_process(timer):
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 279, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
+        lcd.str12(0, 303, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
-        # 第9行：十字路口状态显示
+        # 第11行：十字路口状态显示
         cross_status = "Cross:ON" if cross_flag else "Cross:OFF"
         cross_info = ""
         if cross_flag:
@@ -1496,11 +1539,11 @@ def ccd_process(timer):
             if delay_distance < CROSS_DELAY:
                 delay_info = f" Delay:{CROSS_DELAY - delay_distance:.0f}"
         
-        lcd.str12(0, 291, f"{cross_status}{cross_info}{delay_info}", 0x07FF)  # 青色
+        lcd.str12(0, 315, f"{cross_status}{cross_info}{delay_info}", 0x07FF)  # 青色
         
-        # 第10行：元素识别开关状态显示
+        # 第12行：元素识别开关状态显示
         element_status = "Element:ON" if element_en else "Element:OFF"
-        lcd.str12(0, 303, element_status, 0xF81F)  # 紫色
+        lcd.str12(0, 327, element_status, 0xF81F)  # 紫色
     except:
         # 显示出错也要尝试显示基本信息
         try:
