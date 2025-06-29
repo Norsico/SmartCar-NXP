@@ -321,8 +321,8 @@ line_current_weight = 0.7  # 近端CCD当前权重
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 37.35  # 调整平衡角度
-TARGET_SPEED = 110  # 设置小的前进速度进行测试
+med_roll_angle = 54.5  # 调整平衡角度
+TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车控制参数
@@ -542,7 +542,7 @@ def ahrs_update(gx, gy, gz, ax, ay, az):
     # 计算欧拉角
     value1 = limit_angle(-2 * quaternion.q1 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q2)
     imu_data_obj.Roll = math.asin(value1) * 180 / PI
-    imu_data_obj.Pitch = -math.atan2(2 * quaternion.q2 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q1,
+    imu_data_obj.Pitch = 90 + math.atan2(2 * quaternion.q2 * quaternion.q3 + 2 * quaternion.q0 * quaternion.q1,
                                    -2 * quaternion.q1**2 - 2 * quaternion.q2**2 + 1) * 180 / PI
     imu_data_obj.Yaw = math.atan2(2 * quaternion.q1 * quaternion.q2 + 2 * quaternion.q0 * quaternion.q3,
                                  -2 * quaternion.q2**2 - 2 * quaternion.q3**2 + 1) * 180 / PI
@@ -591,18 +591,17 @@ def control_loop(timer):
     imu_data = imu.get()
     imu_process()
     
-    motor1 = pid_angle_speed.update(angle_1, -imu_data_obj.gyro_x)
+    motor1 = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
     motor2 = motor1
-    
     # CCD巡线控制
-    motor1 -= line_control_output  # 左电机增加转向控制
-    motor2 += line_control_output  # 右电机减少转向控制
+    #motor1 -= line_control_output  # 左电机增加转向控制
+    #motor2 += line_control_output  # 右电机减少转向控制
     
     motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
     
-    motor_l.duty(motor1)
-    motor_r.duty(motor2)
+    motor_l.duty(-motor1)
+    motor_r.duty(-motor2)
     
     # 5ms: 角度控制
     #if ticker_count % 5 == 0:
@@ -610,7 +609,7 @@ def control_loop(timer):
     
     # 10ms: 速度控制
     if ticker_count == 5:
-        avg_speed = (kalman_l.output + kalman_r.output) / 2
+        avg_speed = -(kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
         speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
     if count_time == 0:
