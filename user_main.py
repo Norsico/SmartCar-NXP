@@ -51,8 +51,8 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 21  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 21  # 远端适中
+THRESHOLD_MULTIPLE_1 = 28  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 28  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -303,7 +303,7 @@ angle_kp = -1984.9 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -180.54
 
-roll_angle_Kp = 0.101 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.171 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
 roll_angle_Kd = 0.1131 #0.0826 
 
@@ -312,20 +312,28 @@ speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达�
 speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 13.5  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.015  # 减小平方项系数，避免过度响应
-line_kd = 280  # 适当减小微分系数，减少直线震荡
+line_kp = 17  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.3348  # 减小平方项系数，避免过度响应
+line_kd = 170  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
-gyro_z_kd = 150.0  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 65.49  # 调整平衡角度
-TARGET_SPEED = 160  # 设置小的前进速度进行测试
+med_roll_angle = 65.4  # 调整平衡角度
+TARGET_SPEED = 144  # 设置小的前进速度进行测试
 ticker_count = 0
+
+# 中线低通滤波参数
+middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
+middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
+
+# 巡线控制输出低通滤波参数
+line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
+line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 改为平衡车+巡线控制参数
 wifi_data = [line_kp, line_kd, roll_angle_Kp, roll_angle_Kd, med_roll_angle, line_squart_kp, gyro_z_kd, TARGET_SPEED]
@@ -445,7 +453,6 @@ class LinePDController:
         self.kp_squart = kp_squart
         self.kd = kd
         self.err_last = 0
-        self.squart_threshold = 5.0  # 平方项生效的偏差阈值
     
     def update(self, setpoint, current):
         err = setpoint - current
@@ -1042,6 +1049,13 @@ def middle_sideline():
     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
     # if cross_flag:
     #     Trk.middle_sideline1 = Trk.middle_sideline2
+    
+    # 对middle_sideline1进行低通滤波，减少噪声和突变
+    global middle_line_filtered, middle_line_filter_alpha
+    middle_line_filtered = middle_line_filter_alpha * Trk.middle_sideline1 + (1 - middle_line_filter_alpha) * middle_line_filtered
+    
+    # 将滤波后的值赋回给middle_sideline1
+    Trk.middle_sideline1 = middle_line_filtered
 
 def ring_detection():
     """
@@ -1441,7 +1455,7 @@ def ccd_process(timer):
                 line_deviation *= 0.95  # 逐渐衰减，避免持续偏移
                 
             # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
-            line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
+            raw_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
             
             # 自适应控制强度 - 参考舵机控制范围调整
             # 舵机控制范围约为±450，转换为差速控制需要更大范围
@@ -1455,7 +1469,14 @@ def ccd_process(timer):
             dynamic_max_output = max_control_output * speed_factor * deviation_factor
             
             # 限制线路控制输出
-            line_control_output = limit(line_control_output, -dynamic_max_output, dynamic_max_output)
+            raw_control_output = limit(raw_control_output, -dynamic_max_output, dynamic_max_output)
+            
+            # 对控制输出进行低通滤波，减少电机控制突变
+            global line_output_filtered, line_output_filter_alpha
+            line_output_filtered = line_output_filter_alpha * raw_control_output + (1 - line_output_filter_alpha) * line_output_filtered
+            
+            # 将滤波后的值赋给最终的控制输出
+            line_control_output = line_output_filtered
             
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
@@ -1510,11 +1531,14 @@ def ccd_process(timer):
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：巡线控制参数显示 - 新增
-        lcd.str12(0, 231, f"LineKp:{line_kp:4.1f} LineKd:{line_kd:4.1f} Out:{line_control_output:.0f}", 0xFFE0)  # 黄色
+        # 第4行：巡线控制参数显示 - 显示滤波前后的输出
+        try:
+            lcd.str12(0, 231, f"Raw:{raw_control_output:.0f} Filtered:{line_control_output:.0f}", 0xFFE0)  # 黄色
+        except:
+            lcd.str12(0, 231, f"LineOut:{line_control_output:.0f}", 0xFFE0)  # 降级显示
         
-        # 第5行：巡线模式显示 - 修改为只使用近端CCD
-        lcd.str12(0, 243, f"Line Mode: Near CCD Only", 0x07FF)  # 青色
+        # 第5行：滤波参数显示
+        lcd.str12(0, 243, f"Filter: Mid={middle_line_filter_alpha:.2f} Out={line_output_filter_alpha:.2f}", 0x07FF)  # 青色
         
         # 第6行：CCD阈值状态显示
         threshold_status = f"T1:{THRESHOLD_MULTIPLE_1} T2:{THRESHOLD_MULTIPLE_2}"
