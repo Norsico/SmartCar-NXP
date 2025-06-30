@@ -303,28 +303,28 @@ angle_kp = -1984.9 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -180.54
 
-roll_angle_Kp = 0.171 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.157 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.1131 #0.0826 
+roll_angle_Kd = 0.0939 #0.0826 
 
 speed_Kp = 0.047 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
 speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 17  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.3348  # 减小平方项系数，避免过度响应
-line_kd = 170  # 适当减小微分系数，减少直线震荡
+line_kp = 15.7  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.0805  # 减小平方项系数，避免过度响应
+line_kd = 123  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
-gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 5  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 65.4  # 调整平衡角度
-TARGET_SPEED = 144  # 设置小的前进速度进行测试
+med_roll_angle = 65.411  # 调整平衡角度
+TARGET_SPEED = 165  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # 中线低通滤波参数
@@ -1628,7 +1628,7 @@ imu_init()
 ccd_image_init()  # 初始化CCD图像处理
 pit1.start(1)
 pit3.start(10)
-pit2.start(8)  # CCD
+pit2.start(4)  # CCD
 
 # 系统启动完成
 print("init")
