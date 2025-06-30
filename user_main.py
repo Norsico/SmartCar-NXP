@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = False 
+wifi_en = True 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -303,36 +303,35 @@ angle_kp = -1984.9 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -180.54
 
-roll_angle_Kp = 0.098 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.101 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0945 #0.0826 
+roll_angle_Kd = 0.1131 #0.0826 
 
-speed_Kp = 0.054 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.047 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
-speed_Kd = 1.5 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 11  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_kd = 120  # 减小微分系数，避免震荡（参考C代码的平滑控制）
+line_kp = 13.5  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.02
+line_kd = 293 # 减小微分系数，避免震荡（参考C代码的平滑控制）
 
-# 前瞻控制参数 - 新增
-line_preview_weight = 0.3  # 远端CCD前瞻权重
-line_current_weight = 0.7  # 近端CCD当前权重
+# 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 58.6  # 调整平衡角度
-TARGET_SPEED = 50  # 设置小的前进速度进行测试
+TARGET_SPEED = 160  # 设置小的前进速度进行测试
 ticker_count = 0
 
-# WiFi调参数据存储 - 改为平衡车控制参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, med_roll_angle]
+# WiFi调参数据存储 - 改为平衡车+巡线控制参数
+wifi_data = [line_kp, line_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, speed_Kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
-    global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Ki, speed_Kd, med_roll_angle
-    global pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
+    global line_kp, line_kd, line_squart_kp, roll_angle_Kp, roll_angle_Kd
+    global speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED
+    global pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
     
     if not wifi_enabled:
         return
@@ -346,31 +345,32 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新平衡车控制参数
-        angle_kp = wifi_data[0]             # 角速度环比例控制
-        angle_kd = wifi_data[1]             # 角速度环微分控制
+        # 更新平衡车+巡线控制参数
+        line_kp = wifi_data[0]              # 巡线比例控制
+        line_kd = wifi_data[1]              # 巡线微分控制
         roll_angle_Kp = wifi_data[2]        # 角度环比例控制
         roll_angle_Kd = wifi_data[3]        # 角度环微分控制
         speed_Kp = wifi_data[4]             # 速度环比例控制
-        speed_Ki = wifi_data[5]             # 速度环积分控制
+        line_squart_kp = wifi_data[5]       # 巡线平方项控制
         speed_Kd = wifi_data[6]             # 速度环微分控制
-        med_roll_angle = wifi_data[7]       # 平衡角度
+        TARGET_SPEED = wifi_data[7]         # 目标速度
         
         # 更新PID控制器参数
-        pid_angle_speed.kp = angle_kp
-        pid_angle_speed.kd = angle_kd
+        pid_line.kp = line_kp
+        pid_line.kd = line_kd
+        pid_line.kp_squart = line_squart_kp
         
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         
         pid_speed.kp = speed_Kp
-        pid_speed.ki = speed_Ki
+        pid_speed.ki = speed_Ki  # speed_Ki保持原值，不从WiFi调参
         pid_speed.kd = speed_Kd
         
-        # 发送示波器数据 - 显示平衡车控制相关信息
+        # 发送示波器数据 - 显示巡线+平衡车控制相关信息
         wifi.send_oscilloscope(
             line_deviation, line_control_output, imu_data_obj.gyro_x, imu_data_obj.Pitch,
-            speed_Kp, speed_Ki, roll_angle_Kp, roll_angle_Kd)
+            line_kp, line_kd, line_squart_kp, TARGET_SPEED)
     
     except:
         pass
@@ -417,6 +417,21 @@ class PDController:
         output = self.kp * err + self.kd * err_diff
         self.err_last = err
         return output
+    
+# PD控制器类（用于线路跟踪）
+class LinePDController:
+    def __init__(self, kp, kd, kp_squart):
+        self.kp = kp
+        self.kp_squart = kp_squart
+        self.kd = kd
+        self.err_last = 0
+    
+    def update(self, setpoint, current):
+        err = setpoint - current
+        err_diff = err - self.err_last
+        output = self.kp * err  + self.kd * err_diff+ self.kp_squart * err * abs(err)
+        self.err_last = err
+        return output
 
 # IMU数据类
 class IMUData:
@@ -437,7 +452,7 @@ kalman_r = KalmanFilter()
 pid_angle_speed = PIDController(angle_kp, angle_ki, angle_kd)
 pid_angle = PIDController(roll_angle_Kp, roll_angle_Ki, roll_angle_Kd)
 pid_speed = PIDController(speed_Kp, speed_Ki, speed_Kd)
-pid_line = PDController(line_kp, line_kd)  # 线路跟踪PD控制器
+pid_line = LinePDController(line_kp, line_kd, line_squart_kp)  # 线路跟踪PD控制器
 imu_data_obj = IMUData()
 quaternion = Quaternion()
 
@@ -1299,21 +1314,12 @@ def ccd_processing(ccd_data1, ccd_data2):
     deviation1 = Trk.middle_sideline1 - center  # 近端偏差（当前位置）
     deviation2 = Trk.middle_sideline2 - center  # 远端偏差（前瞻位置）
     
-    # 智能融合策略 - 参考C代码的控制逻辑
+    # 只使用近端CCD控制策略
     if CCD1_left_flag or CCD1_right_flag:
-        # CCD1有边界，使用双CCD融合控制
-        if CCD2_left_flag and CCD2_right_flag and not cross_flag and ring_state == NO_RING:
-            # 正常情况：双CCD融合，增加前瞻性
-            # 参考C代码：error = Trk.middle_sideline1 - MIDDLE_LINE，但我们加入前瞻
-            deviation = deviation1 * line_current_weight + deviation2 * line_preview_weight
-        else:
-            # 特殊情况（环岛、十字等）：只用近端CCD，保持稳定
-            deviation = deviation1
-    elif CCD2_left_flag and CCD2_right_flag:
-        # CCD1失效，使用CCD2
-        deviation = deviation2
+        # 近端CCD有边界，使用近端CCD控制
+        deviation = deviation1
     else:
-        # 都失效，保持上次偏差（添加衰减避免失控）
+        # 近端CCD失效，保持上次偏差（添加衰减避免失控）
         global line_deviation
         deviation = line_deviation * 0.95  # 逐渐衰减，避免持续偏移
     
@@ -1391,23 +1397,15 @@ def ccd_process(timer):
         if ccd_data_upper or ccd_data_lower:
             new_deviation = ccd_processing(ccd_data_lower, ccd_data_upper)
             
-            # 优先使用近端CCD巡线 - 修改巡线策略
+            # 只使用近端CCD巡线
             center = MIDDLE_LINE
             if CCD1_left_flag or CCD1_right_flag:
-                # 近端CCD有边界，优先使用近端CCD巡线
+                # 近端CCD有边界，使用近端CCD巡线
                 deviation1 = Trk.middle_sideline1 - center
                 line_deviation = deviation1
-            elif CCD2_left_flag and CCD2_right_flag:
-                # 近端CCD失效，使用远端CCD
-                deviation2 = Trk.middle_sideline2 - center
-                line_deviation = deviation2
             else:
-                # 都失效，使用原有的融合算法结果
-                # 平滑过渡，避免突变
-                if abs(new_deviation - line_deviation) > 15:
-                    line_deviation = line_deviation * 0.7 + new_deviation * 0.3
-                else:
-                    line_deviation = new_deviation
+                # 近端CCD失效，保持上次偏差并逐渐衰减
+                line_deviation *= 0.95  # 逐渐衰减，避免持续偏移
                 
             # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
             line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
@@ -1482,8 +1480,8 @@ def ccd_process(timer):
         # 第4行：巡线控制参数显示 - 新增
         lcd.str12(0, 231, f"LineKp:{line_kp:4.1f} LineKd:{line_kd:4.1f} Out:{line_control_output:.0f}", 0xFFE0)  # 黄色
         
-        # 第5行：前瞻控制参数显示 - 新增  
-        lcd.str12(0, 243, f"Preview:{line_preview_weight:3.2f} Current:{line_current_weight:3.2f}", 0x07FF)  # 青色
+        # 第5行：巡线模式显示 - 修改为只使用近端CCD
+        lcd.str12(0, 243, f"Line Mode: Near CCD Only", 0x07FF)  # 青色
         
         # 第6行：CCD阈值状态显示
         threshold_status = f"T1:{THRESHOLD_MULTIPLE_1} T2:{THRESHOLD_MULTIPLE_2}"
