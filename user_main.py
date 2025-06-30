@@ -7,12 +7,12 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
 
-MIDDLE_LINE = 65
+MIDDLE_LINE = 64
 
 if wifi_en:
     # WiFi调参初始化
@@ -51,8 +51,8 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 30  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 30  # 远端适中
+THRESHOLD_MULTIPLE_1 = 21  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 21  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -294,7 +294,7 @@ lcd = LCD(drv)
 # color 接口设置屏幕显示颜色 [前景色,背景色]
 lcd.color(0xFFFF, 0x0000)
 # mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
-lcd.mode(2)
+lcd.mode(0)
 # 清屏
 lcd.clear(0x0000)
 
@@ -307,9 +307,9 @@ roll_angle_Kp = 0.098 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
 roll_angle_Kd = 0.0945 #0.0826 
 
-speed_Kp = 0.054 #0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 1.5E-06#4E-06 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
-speed_Kd = 1.5 #1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kp = 0.054 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
+speed_Kd = 1.5 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 11  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
@@ -322,7 +322,7 @@ line_current_weight = 0.7  # 近端CCD当前权重
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 58.6  # 调整平衡角度
-TARGET_SPEED = 0  # 设置小的前进速度进行测试
+TARGET_SPEED = 50  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车控制参数
@@ -588,8 +588,8 @@ def control_loop(timer):
     motor1 = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
     motor2 = motor1
     # CCD巡线控制
-    #motor1 -= line_control_output  # 左电机增加转向控制
-    #motor2 += line_control_output  # 右电机减少转向控制
+    motor1 += line_control_output  # 左电机增加转向控制
+    motor2 -= line_control_output  # 右电机减少转向控制
     
     motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
@@ -1391,11 +1391,23 @@ def ccd_process(timer):
         if ccd_data_upper or ccd_data_lower:
             new_deviation = ccd_processing(ccd_data_lower, ccd_data_upper)
             
-            # 平滑过渡，避免突变
-            if abs(new_deviation - line_deviation) > 15:
-                line_deviation = line_deviation * 0.7 + new_deviation * 0.3
+            # 优先使用近端CCD巡线 - 修改巡线策略
+            center = MIDDLE_LINE
+            if CCD1_left_flag or CCD1_right_flag:
+                # 近端CCD有边界，优先使用近端CCD巡线
+                deviation1 = Trk.middle_sideline1 - center
+                line_deviation = deviation1
+            elif CCD2_left_flag and CCD2_right_flag:
+                # 近端CCD失效，使用远端CCD
+                deviation2 = Trk.middle_sideline2 - center
+                line_deviation = deviation2
             else:
-                line_deviation = new_deviation
+                # 都失效，使用原有的融合算法结果
+                # 平滑过渡，避免突变
+                if abs(new_deviation - line_deviation) > 15:
+                    line_deviation = line_deviation * 0.7 + new_deviation * 0.3
+                else:
+                    line_deviation = new_deviation
                 
             # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
             line_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
