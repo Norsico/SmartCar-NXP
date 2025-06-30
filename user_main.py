@@ -313,25 +313,28 @@ speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是�
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 13.5  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.02
-line_kd = 293 # 减小微分系数，避免震荡（参考C代码的平滑控制）
+line_squart_kp = 0.015  # 减小平方项系数，避免过度响应
+line_kd = 280  # 适当减小微分系数，减少直线震荡
+
+# 偏航角速度抑制参数
+gyro_z_kd = 150.0  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 58.6  # 调整平衡角度
+med_roll_angle = 65.49  # 调整平衡角度
 TARGET_SPEED = 160  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # WiFi调参数据存储 - 改为平衡车+巡线控制参数
-wifi_data = [line_kp, line_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, speed_Kd, TARGET_SPEED]
+wifi_data = [line_kp, line_kd, roll_angle_Kp, roll_angle_Kd, med_roll_angle, line_squart_kp, gyro_z_kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
     global line_kp, line_kd, line_squart_kp, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED
-    global pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
+    global med_roll_angle, gyro_z_kd, speed_Ki, TARGET_SPEED
+    global pid_angle, pid_speed, pid_line, gyro_z_controller, wifi_data, motor1, motor2
     
     if not wifi_enabled:
         return
@@ -350,9 +353,9 @@ def update_wifi_parameters():
         line_kd = wifi_data[1]              # 巡线微分控制
         roll_angle_Kp = wifi_data[2]        # 角度环比例控制
         roll_angle_Kd = wifi_data[3]        # 角度环微分控制
-        speed_Kp = wifi_data[4]             # 速度环比例控制
+        med_roll_angle = wifi_data[4]       # 平衡角度
         line_squart_kp = wifi_data[5]       # 巡线平方项控制
-        speed_Kd = wifi_data[6]             # 速度环微分控制
+        gyro_z_kd = wifi_data[6]            # 偏航角速度抑制系数
         TARGET_SPEED = wifi_data[7]         # 目标速度
         
         # 更新PID控制器参数
@@ -363,14 +366,18 @@ def update_wifi_parameters():
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         
-        pid_speed.kp = speed_Kp
+        # speed_Kp和speed_Kd保持原值，不从WiFi调参
+        # pid_speed.kp = speed_Kp (保持原值)
         pid_speed.ki = speed_Ki  # speed_Ki保持原值，不从WiFi调参
-        pid_speed.kd = speed_Kd
+        # pid_speed.kd = speed_Kd (保持原值)
+        
+        # 更新偏航角速度抑制控制器参数
+        gyro_z_controller.kd = gyro_z_kd
         
         # 发送示波器数据 - 显示巡线+平衡车控制相关信息
         wifi.send_oscilloscope(
             line_deviation, line_control_output, imu_data_obj.gyro_x, imu_data_obj.Pitch,
-            line_kp, line_kd, line_squart_kp, TARGET_SPEED)
+            med_roll_angle, gyro_z_kd, line_squart_kp, TARGET_SPEED)
     
     except:
         pass
@@ -418,6 +425,19 @@ class PDController:
         self.err_last = err
         return output
     
+# D控制器类（用于偏航角速度抑制）
+class DController:
+    def __init__(self, kd):
+        self.kd = kd
+        self.last_value = 0.0
+    
+    def update(self, current_value):
+        # D控制：输出与输入变化率成正比
+        diff = current_value - self.last_value
+        output = -self.kd * diff  # 负号表示抑制变化
+        self.last_value = current_value
+        return output
+
 # PD控制器类（用于线路跟踪）
 class LinePDController:
     def __init__(self, kp, kd, kp_squart):
@@ -425,11 +445,15 @@ class LinePDController:
         self.kp_squart = kp_squart
         self.kd = kd
         self.err_last = 0
+        self.squart_threshold = 5.0  # 平方项生效的偏差阈值
     
     def update(self, setpoint, current):
         err = setpoint - current
         err_diff = err - self.err_last
-        output = self.kp * err  + self.kd * err_diff+ self.kp_squart * err * abs(err)
+        
+        # 基础PD控制
+        output = self.kp * err + self.kd * err_diff + self.kp_squart * err * abs(err)
+        
         self.err_last = err
         return output
 
@@ -453,6 +477,7 @@ pid_angle_speed = PIDController(angle_kp, angle_ki, angle_kd)
 pid_angle = PIDController(roll_angle_Kp, roll_angle_Ki, roll_angle_Kd)
 pid_speed = PIDController(speed_Kp, speed_Ki, speed_Kd)
 pid_line = LinePDController(line_kp, line_kd, line_squart_kp)  # 线路跟踪PD控制器
+gyro_z_controller = DController(gyro_z_kd)  # 偏航角速度抑制控制器
 imu_data_obj = IMUData()
 quaternion = Quaternion()
 
@@ -601,10 +626,18 @@ def control_loop(timer):
     imu_process()
     
     motor1 = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
+
+    # 偏航角速度抑制控制
+    gyro_z_control = gyro_z_controller.update(imu_data_obj.gyro_z)
+    
     motor2 = motor1
     # CCD巡线控制
     motor1 += line_control_output  # 左电机增加转向控制
     motor2 -= line_control_output  # 右电机减少转向控制
+    
+    # 偏航角速度抑制控制（双电机差速）
+    motor1 += gyro_z_control  # 左电机增加偏航抑制
+    motor2 -= gyro_z_control  # 右电机减少偏航抑制
     
     motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
@@ -1586,7 +1619,7 @@ while True:
     
     # 蜂鸣器处理 - 不阻塞主循环
     beep_process()
-    
+
     # WiFi调参更新
     update_wifi_parameters()
     
