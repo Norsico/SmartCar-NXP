@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -299,22 +299,22 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1686 #测过了 两个都是负的 kd不是正的
+angle_kp = -1522 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -140
 
-roll_angle_Kp = 0.661 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.521 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.1195 #0.0826 
+roll_angle_Kd = 0.178 #0.0826 
 
-speed_Kp = 0.025 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.03 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 2E-08# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
 speed_Kd = 0 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 9.7  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.0148  # 减小平方项系数，避免过度响应
-line_kd = 137  # 适当减小微分系数，减少直线震荡
+line_kp = 9.8  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.015  # 减小平方项系数，避免过度响应
+line_kd = 372  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
 gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
@@ -324,7 +324,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 60.1  # 调整平衡角度
-TARGET_SPEED = 95  # 设置小的前进速度进行测试
+TARGET_SPEED = 123  # 设置小的前进速度进行测试
 ticker_count = 0
 gyro_z_control = 0  # 偏航角速度抑制控制输出
 
