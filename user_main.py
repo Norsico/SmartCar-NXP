@@ -299,17 +299,17 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -2297 #测过了 两个都是负的 kd不是正的
+angle_kp = -1984.9 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -180.54
 
-roll_angle_Kp = 0.114 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.157 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.1138 #0.0826 
+roll_angle_Kd = 0.0939 #0.0826 
 
-speed_Kp = 0.023 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 1.13E-05 # 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
-speed_Kd = 1.31 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kp = 0.047 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
+speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 15.7  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
@@ -317,19 +317,20 @@ line_squart_kp = 0.0805  # 减小平方项系数，避免过度响应
 line_kd = 123  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
-gyro_z_kd = 5  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 64  # 调整平衡角度
-TARGET_SPEED = 165  # 设置小的前进速度进行测试
+med_roll_angle = 60.1  # 调整平衡角度
+TARGET_SPEED = 0  # 设置小的前进速度进行测试
 ticker_count = 0
 
 # 中线低通滤波参数
 middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
 middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
+
 
 # 巡线控制输出低通滤波参数
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
@@ -1452,19 +1453,8 @@ def ccd_process(timer):
             # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
             raw_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
             
-            # 自适应控制强度 - 参考舵机控制范围调整
-            # 舵机控制范围约为±450，转换为差速控制需要更大范围
-            max_control_output = 4500  # 基础最大输出
-            
-            # 根据速度和偏差动态调整控制强度
-            speed_factor = min(TARGET_SPEED / 100.0, 1.5)  # 速度系数
-            deviation_factor = min(abs(line_deviation) / 20.0, 1.2)  # 偏差系数
-            
-            # 动态最大输出 = 基础输出 × 速度系数 × 偏差系数
-            dynamic_max_output = max_control_output * speed_factor * deviation_factor
-            
             # 限制线路控制输出
-            raw_control_output = limit(raw_control_output, -dynamic_max_output, dynamic_max_output)
+            raw_control_output = limit(raw_control_output, -6666, 6666)
             
             # 对控制输出进行低通滤波，减少电机控制突变
             global line_output_filtered, line_output_filter_alpha
