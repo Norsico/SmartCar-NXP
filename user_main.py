@@ -299,17 +299,17 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1984.9 #测过了 两个都是负的 kd不是正的
+angle_kp = -1770 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -180.54
+angle_kd = -145
 
-roll_angle_Kp = 0.157 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.43 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0939 #0.0826 
+roll_angle_Kd = 0.0944 #0.0826 
 
 speed_Kp = 0.047 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 1.5E-06# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
-speed_Kd = 1.57 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Ki = 2E-08# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
+speed_Kd = 0 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 15.7  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
@@ -317,15 +317,16 @@ line_squart_kp = 0.0805  # 减小平方项系数，避免过度响应
 line_kd = 123  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
-gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 60.1  # 调整平衡角度
-TARGET_SPEED = 0  # 设置小的前进速度进行测试
+TARGET_SPEED = 90  # 设置小的前进速度进行测试
 ticker_count = 0
+gyro_z_control = 0  # 偏航角速度抑制控制输出
 
 # 中线低通滤波参数
 middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
@@ -337,12 +338,12 @@ line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 平衡车控制参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, med_roll_angle]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Ki, speed_Kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Ki, speed_Kd, med_roll_angle
+    global speed_Kp, speed_Ki, speed_Kd, med_roll_angle, TARGET_SPEED, gyro_z_control
     global pid_angle_speed, pid_angle, pid_speed, wifi_data, motor1, motor2
     
     if not wifi_enabled:
@@ -365,7 +366,7 @@ def update_wifi_parameters():
         speed_Kp = wifi_data[4]             # 速度环比例控制
         speed_Ki = wifi_data[5]             # 速度环积分控制
         speed_Kd = wifi_data[6]             # 速度环微分控制
-        med_roll_angle = wifi_data[7]       # 平衡角度
+        TARGET_SPEED = wifi_data[7]         # 目标速度
         
         # 更新PID控制器参数
         pid_angle_speed.kp = angle_kp
@@ -381,7 +382,7 @@ def update_wifi_parameters():
         # 发送示波器数据 - 显示平衡车控制相关信息
         wifi.send_oscilloscope(
             line_deviation, line_control_output, imu_data_obj.gyro_x, imu_data_obj.Pitch,
-            speed_Kp, speed_Ki, roll_angle_Kp, roll_angle_Kd)
+            speed_Kp, motor1, motor2, gyro_z_control)
     
     except:
         pass
@@ -618,7 +619,7 @@ def imu_init():
         Filter_data[i] /= 1000
 count_time=0
 def control_loop(timer):
-    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output,count_time
+    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, count_time, gyro_z_control
     
     ticker_flag = True
     count_time = (count_time+1)%2000
