@@ -31,49 +31,37 @@ timer_start = 0  # 定时器开始时间
 timer_duration = 3000  # 定时器持续时间3秒(3000毫秒)
 
 def check_track_around_obstacle(img, blob):
-    """检查障碍物周围是否有白色赛道"""
+    """检查障碍物对侧是否有白色赛道可以通行"""
     x, y, w, h = blob.rect()
     
     # 定义检测区域的偏移量
-    check_distance = 15  # 检测距离
+    check_distance = 20  # 检测距离
     
-    # 上方检测区域
-    top_y = max(0, y - check_distance)
-    top_region = (x, top_y, w, min(check_distance, y))
-    
-    # 下方检测区域  
-    bottom_y = min(img_height, y + h)
-    bottom_region = (x, bottom_y, w, min(check_distance, img_height - bottom_y))
-    
-    # 左侧检测区域
-    left_x = max(0, x - check_distance)
-    left_region = (left_x, y, min(check_distance, x), h)
-    
-    # 右侧检测区域
-    right_x = min(img_width, x + w)
-    right_region = (right_x, y, min(check_distance, img_width - right_x), h)
+    # 判断障碍物在图像的左侧还是右侧
+    obstacle_x = blob.cx()
+    is_obstacle_on_left = obstacle_x < center_x
     
     white_regions_found = 0
     total_regions = 0
     
-    # 检查各个方向的白色区域
+    # 根据障碍物位置检查对侧的白色区域
     regions_to_check = []
     
-    # 上方区域
-    if top_region[3] > 5:  # 高度大于5才检测
-        regions_to_check.append(("top", top_region))
-    
-    # 下方区域
-    if bottom_region[3] > 5:  # 高度大于5才检测
-        regions_to_check.append(("bottom", bottom_region))
-    
-    # 左侧区域
-    if left_region[2] > 5:  # 宽度大于5才检测
-        regions_to_check.append(("left", left_region))
-    
-    # 右侧区域
-    if right_region[2] > 5:  # 宽度大于5才检测
-        regions_to_check.append(("right", right_region))
+    if is_obstacle_on_left:
+        # 障碍物在左侧，检测右侧是否有白色赛道
+        right_x = min(img_width, x + w + 5)  # 从障碍物右边开始稍微偏移
+        right_region = (right_x, y, min(check_distance, img_width - right_x), h)
+        
+        if right_region[2] > 5:  # 宽度大于5才检测
+            regions_to_check.append(("right", right_region))
+    else:
+        # 障碍物在右侧，检测左侧是否有白色赛道
+        left_x = max(0, x - check_distance - 5)  # 向左检测，稍微偏移
+        left_width = min(check_distance, x - 5)
+        left_region = (left_x, y, left_width, h)
+        
+        if left_region[2] > 5:  # 宽度大于5才检测
+            regions_to_check.append(("left", left_region))
     
     for direction, region in regions_to_check:
         if region[2] > 0 and region[3] > 0:  # 确保区域有效
@@ -106,8 +94,8 @@ def check_track_around_obstacle(img, blob):
             except:
                 pass
     
-    # 至少需要2个方向有白色赛道才认为是有效障碍物
-    is_on_track = white_regions_found >= 2 and total_regions >= 2
+    # 只要对侧有白色赛道就认为是有效障碍物
+    is_on_track = white_regions_found >= 1 and total_regions >= 1
     
     return is_on_track, white_regions_found, total_regions
 
