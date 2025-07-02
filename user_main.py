@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -107,6 +107,12 @@ cross_middle_line = MIDDLE_LINE  # 检测到十字路口时保存的中线值
 CROSS_ENCODER = 30      # 十字路口编码器距离阈值（参考值）
 CROSS_DELAY = 40        # 环岛结束后延时距离，避免误检测
 
+# 摄像头通信相关全局变量
+camera_obstacle_status = "no"  # 当前障碍物状态：left, right, no
+camera_command_timer = 0       # 命令发送定时器
+camera_receive_buffer = ""     # 接收缓冲区
+last_obstacle_message = ""     # 上次收到的障碍物消息
+
 # CCD信息类
 class CCDInformation:
     def __init__(self):
@@ -165,10 +171,6 @@ black_write_2 = False
 # 直线弯道判断标志
 straight = False
 curve = False
-
-# 硬件初始化
-end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
-end_state = end_switch.value()
 
 # 蜂鸣器初始化
 beep = Pin('D24', Pin.OUT, pull=Pin.PULL_UP_47K, value=False)
@@ -276,6 +278,9 @@ imu_data = imu.get()
 ccd = TSL1401(10)
 ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
+
+# 摄像头串口通信初始化 - LPUART6 (D20-TX, D21-RX)
+uart_camera = UART(5, baudrate=115200)  # 使用与OpenMV相同的波特率
 
 # IPS200屏幕初始化
 # 定义片选引脚
@@ -387,6 +392,61 @@ def update_wifi_parameters():
     
     except:
         pass
+
+def send_camera_obs_command():
+    """发送obs指令到摄像头"""
+    try:
+        uart_camera.write("obs")
+    except:
+        pass  # 发送失败不影响主程序
+
+def process_camera_data():
+    """处理摄像头数据"""
+    global camera_obstacle_status, camera_receive_buffer, last_obstacle_message
+    
+    # 检查是否有数据可读
+    if uart_camera.any():
+        try:
+            # 读取数据
+            received_data = uart_camera.read()
+
+            if received_data:
+                # 将字节转换为字符串并添加到缓冲区
+                camera_receive_buffer += received_data.decode('utf-8', errors='ignore')
+                
+                # 处理接收到的数据
+                # 检查是否包含完整的状态信息
+                if "left" in camera_receive_buffer.lower():
+                    camera_obstacle_status = "left"
+                    last_obstacle_message = "left"
+                    camera_receive_buffer = ""  # 清空缓冲区
+                elif "right" in camera_receive_buffer.lower():
+                    camera_obstacle_status = "right"
+                    last_obstacle_message = "right"
+                    camera_receive_buffer = ""  # 清空缓冲区
+                elif "no" in camera_receive_buffer.lower():
+                    camera_obstacle_status = "no"
+                    last_obstacle_message = "no"
+                    camera_receive_buffer = ""  # 清空缓冲区
+                
+                # 处理主动发送的障碍物消息
+                if "obstacle-left" in camera_receive_buffer.lower():
+                    camera_obstacle_status = "left"
+                    last_obstacle_message = "obstacle-left"
+                    set_beep_short()  # 检测到障碍物时响铃
+                    camera_receive_buffer = ""
+                elif "obstacle-right" in camera_receive_buffer.lower():
+                    camera_obstacle_status = "right"
+                    last_obstacle_message = "obstacle-right"
+                    set_beep_short()  # 检测到障碍物时响铃
+                    camera_receive_buffer = ""
+                
+                # 限制缓冲区大小
+                if len(camera_receive_buffer) > 50:
+                    camera_receive_buffer = camera_receive_buffer[-20:]
+        except:
+            # 处理异常，清空缓冲区
+            camera_receive_buffer = ""
 
 # 卡尔曼滤波参数
 class KalmanFilter:
@@ -663,7 +723,7 @@ def control_loop(timer):
         pid_speed.err_sum=0;
 
 def encoder_update(timer):
-    global encoder_integral
+    global encoder_integral, camera_command_timer
     
     # 获取原始编码器数据（每个周期的脉冲数）
     encoder_l_raw = encoder_l.get()
@@ -681,6 +741,15 @@ def encoder_update(timer):
     # 这里编码器值就是脉冲数，直接乘以时间周期进行积分
     distance_increment = avg_encoder * 0.01  # 10ms定时器周期
     encoder_integral += distance_increment
+    
+    # 摄像头通信处理 - 每10ms执行一次（与pit3定时器周期一致）
+    camera_command_timer += 1
+    
+    # 每次都发送obs指令查询障碍物状态
+    send_camera_obs_command()
+    
+    # 处理摄像头返回的数据
+    process_camera_data()
 
 def ccd_image_init():
     """CCD图像初始化"""
@@ -1540,8 +1609,19 @@ def ccd_process(timer):
         
         lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
-        # 第5行：当前陀螺仪Pitch显示
-        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:6.2f}", 0x07E0)  # 绿色
+        # 第5行：摄像头障碍物状态显示
+        camera_color = 0x07E0  # 默认绿色
+        if camera_obstacle_status == "left":
+            camera_color = 0x001F  # 蓝色表示左侧障碍物
+        elif camera_obstacle_status == "right":
+            camera_color = 0xFFE0  # 黄色表示右侧障碍物
+        elif camera_obstacle_status == "no":
+            camera_color = 0x07E0  # 绿色表示无障碍物
+        
+        lcd.str12(0, 243, f"Camera:{camera_obstacle_status.upper():5s} Msg:{last_obstacle_message}", camera_color)
+        
+        # 第6行：当前陀螺仪Pitch显示
+        lcd.str12(0, 255, f"Pitch:{imu_data_obj.Pitch:6.2f} Timer:{camera_command_timer}", 0x07E0)  # 绿色
     except:
         # 显示出错也要尝试显示基本信息
         try:
@@ -1584,12 +1664,6 @@ while True:
 
     # WiFi调参更新
     update_wifi_parameters()
-    
-    if end_switch.value() != end_state:
-        pit1.stop()
-        pit3.stop()
-        pit2.stop()  # 停止CCD定时器
-        break
     
     # 主循环延时，控制蜂鸣器更新频率约50Hz
     time.sleep_ms(20)
