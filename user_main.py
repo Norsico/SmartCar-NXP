@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = False 
+wifi_en = True 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -17,7 +17,7 @@ MIDDLE_LINE = 64
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.71.9", "8086")
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.86.9", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -299,22 +299,22 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1522 #测过了 两个都是负的 kd不是正的
+angle_kp = -1330 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -140
+angle_kd = -215
 
-roll_angle_Kp = 0.521 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.511 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.178 #0.0826 
+roll_angle_Kd = 0.7481 #0.0826 
 
-speed_Kp = 0.03 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.031 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 2E-08# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
-speed_Kd = 0 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.015 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 9.8  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.015  # 减小平方项系数，避免过度响应
-line_kd = 372  # 适当减小微分系数，减少直线震荡
+line_kp = 12  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.008  # 减小平方项系数，避免过度响应
+line_kd = 600  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
 gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
@@ -323,8 +323,8 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 60.1  # 调整平衡角度
-TARGET_SPEED = 123  # 设置小的前进速度进行测试
+med_roll_angle = 59.5  # 调整平衡角度
+TARGET_SPEED = 120  # 设置小的前进速度进行测试
 ticker_count = 0
 gyro_z_control = 0  # 偏航角速度抑制控制输出
 
@@ -332,18 +332,17 @@ gyro_z_control = 0  # 偏航角速度抑制控制输出
 middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
 middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 
-
 # 巡线控制输出低通滤波参数
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 平衡车控制参数
-wifi_data = [line_kp, line_squart_kp, line_kd, roll_angle_Kd, speed_Kp, angle_kp, roll_angle_Kp, TARGET_SPEED]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, line_squart_kp, speed_Kp, line_kp, line_kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据"""
     global line_kp, line_squart_kp, line_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, angle_kp, med_roll_angle, TARGET_SPEED, gyro_z_control
+    global speed_Kp, speed_Ki, speed_Kd, angle_kp, angle_kd, TARGET_SPEED, gyro_z_control
     global pid_angle_speed, pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
     
     if not wifi_enabled:
@@ -359,20 +358,20 @@ def update_wifi_parameters():
                 wifi_data[i] = wifi.get_data(i)
         
         # 更新平衡车控制参数
-        line_kp = wifi_data[0]              # 线路跟踪比例控制
-        line_squart_kp = wifi_data[1]       # 线路跟踪平方项控制
-        line_kd = wifi_data[2]              # 线路跟踪微分控制
-        roll_angle_Kd = wifi_data[3]        # 角度环微分控制
+        angle_kp = wifi_data[0]             # 角速度环比例控制
+        angle_kd = wifi_data[1]             # 角速度环微分控制
+        roll_angle_Kp = wifi_data[2]        # 角度环比例控制
+        line_squart_kp = wifi_data[3]       # 线路跟踪平方项控制
         speed_Kp = wifi_data[4]             # 速度环比例控制
-        angle_kp = wifi_data[5]             # 角速度环比例控制
-        roll_angle_Kp = wifi_data[6]        # 角度环比例控制
+        line_kp = wifi_data[5]              # 线路跟踪比例控制
+        line_kd = wifi_data[6]              # 线路跟踪微分控制
         TARGET_SPEED = wifi_data[7]         # 目标速度
         
         # 更新PID控制器参数
         pid_angle_speed.kp = angle_kp
+        pid_angle_speed.kd = angle_kd
         
         pid_angle.kp = roll_angle_Kp
-        pid_angle.kd = roll_angle_Kd
         
         pid_speed.kp = speed_Kp
         
@@ -1507,7 +1506,7 @@ def ccd_process(timer):
         if 0 <= int(Trk.middle_sideline1) <= 127:
             lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
         
-        # 第1行：近端边界位置
+                # 第1行：近端边界位置
         lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
         
         # 第2行：远端边界位置和偏差
@@ -1519,40 +1518,7 @@ def ccd_process(timer):
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：巡线控制参数显示 - 显示滤波前后的输出
-        try:
-            lcd.str12(0, 231, f"Raw:{raw_control_output:.0f} Filtered:{line_control_output:.0f}", 0xFFE0)  # 黄色
-        except:
-            lcd.str12(0, 231, f"LineOut:{line_control_output:.0f}", 0xFFE0)  # 降级显示
-        
-        # 第5行：滤波参数显示
-        lcd.str12(0, 243, f"Filter: Mid={middle_line_filter_alpha:.2f} Out={line_output_filter_alpha:.2f}", 0x07FF)  # 青色
-        
-        # 第6行：CCD阈值状态显示
-        threshold_status = f"T1:{THRESHOLD_MULTIPLE_1} T2:{THRESHOLD_MULTIPLE_2}"
-        if THRESHOLD_MULTIPLE_1 == ring_threshold_1:
-            threshold_status += " (Ring-T1)"
-        lcd.str12(0, 255, threshold_status, 0xFFE0)  # 黄色
-        
-        # 第7行：CCD1边界检测状态 (基于原始边界检测算法)
-        ccd1_status = ""
-        ccd1_status += "L1:" + ("V" if CCD1_left_flag else "X")  # V=有效 X=丢线
-        ccd1_status += " R1:" + ("V" if CCD1_right_flag else "X")
-        lcd.str12(0, 267, f"CCD1 {ccd1_status}", 0xF81F)  # 紫色
-        
-        # 第8行：CCD2边界检测状态 (基于原始边界检测算法)
-        ccd2_status = ""
-        ccd2_status += "L2:" + ("V" if CCD2_left_flag else "X")
-        ccd2_status += " R2:" + ("V" if CCD2_right_flag else "X")
-        lcd.str12(0, 279, f"CCD2 {ccd2_status}", 0xF81F)  # 紫色
-        
-        # 第9行：黑白场景检测 (重点显示)
-        black_status = ""
-        black_status += "B1:" + ("Y" if black_write_1 else "N")
-        black_status += " B2:" + ("Y" if black_write_2 else "N")
-        lcd.str12(0, 291, f"Black {black_status}", 0xFFE0)  # 黄色
-        
-        # 第10行：环岛状态显示
+        # 第4行：环岛状态显示
         ring_status = ""
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "FOUND"
@@ -1572,26 +1538,10 @@ def ccd_process(timer):
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 303, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
+        lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
-        # 第11行：十字路口状态显示
-        cross_status = "Cross:ON" if cross_flag else "Cross:OFF"
-        cross_info = ""
-        if cross_flag:
-            cross_info = f" E:{abs(cross_encoder - encoder_integral):.0f} M:{cross_middle_line:.1f}"
-        
-        # 显示环岛结束后的延时状态
-        delay_info = ""
-        if cross_delay_encoder > 0:
-            delay_distance = abs(encoder_integral - cross_delay_encoder)
-            if delay_distance < CROSS_DELAY:
-                delay_info = f" Delay:{CROSS_DELAY - delay_distance:.0f}"
-        
-        lcd.str12(0, 315, f"{cross_status}{cross_info}{delay_info}", 0x07FF)  # 青色
-        
-        # 第12行：元素识别开关状态显示
-        element_status = "Element:ON" if element_en else "Element:OFF"
-        lcd.str12(0, 327, element_status, 0xF81F)  # 紫色
+        # 第5行：当前陀螺仪Pitch显示
+        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:6.2f}", 0x07E0)  # 绿色
     except:
         # 显示出错也要尝试显示基本信息
         try:
