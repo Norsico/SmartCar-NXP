@@ -1,6 +1,8 @@
 import sensor, image, time
 from machine import UART
 from pyb import LED
+import seekfree
+from seekfree import Timer
 white = LED(4)
 
 sensor.reset()
@@ -12,6 +14,16 @@ clock = time.clock()
 
 # 初始化串口
 uart2 = UART(2, baudrate=115200)     # 初始化串口2 波特率设置为115200
+
+# 全局状态变量 - 用于存储当前检测状态
+current_obstacle_status = {
+    'detected': False,
+    'position': None,
+    'last_update': 0
+}
+
+# 初始化seekfree库
+seekfree.init()
 
 # 根据新的RGB统计数据重新设置阈值
 # 但这个范围太宽，我们需要更精确的黑色检测
@@ -37,6 +49,40 @@ class UARTBuffer:
         self.data = ""
 
 uart_buf = UARTBuffer()  # 创建缓冲区对象
+
+def uart_timer_callback(timer_obj):
+    """定时器回调函数 - 定期检查串口并响应"""
+    global current_obstacle_status, uart_buf, uart2
+
+    try:
+        # 检查串口是否有数据
+        if uart2.any():
+            received_data = uart2.read()
+            if received_data:
+                received_str = received_data.decode('utf-8')
+                uart_buf.data += received_str
+
+                # 检查是否包含完整的obs指令
+                if "obs" in uart_buf.data:
+                    print("obs指令收到")
+                    # 立即根据当前状态响应
+                    if current_obstacle_status['detected'] and current_obstacle_status['position']:
+                        if current_obstacle_status['position'] == "LEFT":
+                            uart2.write("left\r")
+                        elif current_obstacle_status['position'] == "RIGHT":
+                            uart2.write("right\r")
+                    else:
+                        uart2.write("no\r")
+
+                    uart_buf.data = ""  # 清空缓冲区
+                elif len(uart_buf.data) > 20:  # 防止缓冲区过长
+                    uart_buf.data = uart_buf.data[-10:]
+    except:
+        pass  # 定时器中忽略错误
+
+# 创建定时器用于串口处理 - 每10ms检查一次串口
+uart_timer = Timer(1, 10)  # 定时器通道1，每10ms触发一次
+uart_timer.callback(uart_timer_callback)
 
 def check_track_around_obstacle(img, blob):
     """检查障碍物对侧和下方是否有白色赛道可以通行"""
@@ -167,7 +213,7 @@ while(True):
 
     for blob in blobs:
         # 面积过滤条件
-        if blob.area() > 222 and blob.area() < 888:
+        if blob.area() > 222 and blob.area() < 1000:
             # 检查障碍物周围是否有白色赛道
             is_on_track, white_found, total_checked = check_track_around_obstacle(img, blob)
 
@@ -194,40 +240,10 @@ while(True):
             # 使用滤波机制确认检测结果
     confirmed, confirmed_position = update_detection_buffer(current_obstacle_detected, current_position)
 
-    # 检查串口指令
-    uart_num = uart2.any()  # 获取当前串口数据数量
-    if uart_num:
-        received_data = uart2.read(uart_num)
-        # 将字节数据解码为字符串
-        try:
-            received_str = received_data.decode('utf-8')
-            print("收到数据片段:", repr(received_str))  # 调试输出，使用repr显示特殊字符
-
-            # 累积到缓冲区
-            uart_buf.data += received_str
-
-            # 检查是否包含完整的指令
-            if "obs" in uart_buf.data:
-                print("检测到完整obs指令")  # 调试输出
-                # 根据当前检测状态发送响应
-                if confirmed and confirmed_position:
-                    if confirmed_position == "LEFT":
-                        uart2.write("left\r")
-                        print("发送响应: left")
-                    elif confirmed_position == "RIGHT":
-                        uart2.write("right\r")
-                        print("发送响应: right")
-                else:
-                    uart2.write("no\r")
-                    print("发送响应: no")
-                uart_buf.data = ""  # 清空缓冲区
-            elif len(uart_buf.data) > 20:  # 防止缓冲区过长
-                # 保留最后10个字符，防止指令跨越清理边界
-                uart_buf.data = uart_buf.data[-10:]
-                print("缓冲区过长，清理保留:", repr(uart_buf.data))
-
-        except:
-            print("数据解码失败:", received_data)  # 调试输出
+    # 更新全局状态变量 - 供串口中断使用
+    current_obstacle_status['detected'] = confirmed
+    current_obstacle_status['position'] = confirmed_position
+    current_obstacle_status['last_update'] = time.ticks_ms()
 
     # 只有在确认检测到障碍物且当前确实有检测结果且位置一致时才绘制
     if confirmed and current_obstacle_detected and current_blob_data and current_blob_data['position'] == confirmed_position:

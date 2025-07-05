@@ -117,7 +117,7 @@ camera_command_pending = False # 是否正在等待摄像头响应
 # 障碍物检测控制变量
 obstacle_detection_enabled = True  # 是否启用障碍物检测
 obstacle_detected_encoder = 0.0    # 检测到障碍物时的编码器值
-OBSTACLE_RESET_DISTANCE = 14     # 检测到障碍物后需要行驶的距离才重新启用检测
+OBSTACLE_RESET_DISTANCE = 22     # 检测到障碍物后需要行驶的距离才重新启用检测
 
 # 避障巡线相关变量
 obstacle_avoidance_active = False  # 是否正在执行避障巡线
@@ -331,7 +331,7 @@ speed_Kd = 0.015 # 1.7 给小了虽然到达预定速度的时间会变长但是
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 10  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 300  # 适当减小微分系数，减少直线震荡
+line_kd = 270  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
 gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
@@ -407,11 +407,11 @@ def update_wifi_parameters():
 
 def send_camera_obs_command():
     """发送obs指令到摄像头"""
-    global camera_command_pending, obstacle_detection_enabled
+    global obstacle_detection_enabled
     try:
-        if obstacle_detection_enabled and not camera_command_pending:  # 只有在启用检测且没有等待响应时才发送
+        if obstacle_detection_enabled:  # 只检查是否启用检测，不检查等待状态
             uart_camera.write("obs")
-            camera_command_pending = True  # 标记正在等待响应
+            # 移除等待状态标记，实现连续发送
             # 调试信息：可以在屏幕上显示发送状态
             # print("发送obs指令")  # 如果需要调试可以取消注释
     except:
@@ -419,7 +419,7 @@ def send_camera_obs_command():
 
 def process_camera_data():
     """处理摄像头数据"""
-    global camera_obstacle_status, camera_receive_buffer, last_obstacle_message, camera_command_pending
+    global camera_obstacle_status, camera_receive_buffer, last_obstacle_message
     global obstacle_detection_enabled, obstacle_detected_encoder, encoder_integral
     global obstacle_avoidance_active, obstacle_side
     
@@ -440,7 +440,7 @@ def process_camera_data():
                     camera_obstacle_status = "left"
                     last_obstacle_message = "left"
                     camera_receive_buffer = ""  # 清空缓冲区
-                    camera_command_pending = False  # 收到响应，可以发送下一个指令
+                    # 移除等待状态重置，实现连续通信
                     set_beep_short()  # 检测到左侧障碍物时响铃
                     # 检测到障碍物，禁用检测并记录当前编码器值
                     obstacle_detection_enabled = False
@@ -452,7 +452,7 @@ def process_camera_data():
                     camera_obstacle_status = "right"
                     last_obstacle_message = "right"
                     camera_receive_buffer = ""  # 清空缓冲区
-                    camera_command_pending = False  # 收到响应，可以发送下一个指令
+                    # 移除等待状态重置，实现连续通信
                     set_beep_short()  # 检测到右侧障碍物时响铃
                     # 检测到障碍物，禁用检测并记录当前编码器值
                     obstacle_detection_enabled = False
@@ -464,7 +464,7 @@ def process_camera_data():
                     camera_obstacle_status = "no"
                     last_obstacle_message = "no"
                     camera_receive_buffer = ""  # 清空缓冲区
-                    camera_command_pending = False  # 收到响应，可以发送下一个指令
+                    # 移除等待状态重置，实现连续通信
                 
                 # 处理主动发送的障碍物消息
                 if "obstacle-left" in camera_receive_buffer.lower():
@@ -496,7 +496,7 @@ def check_obstacle_detection_reset():
         distance_traveled = abs(encoder_integral - obstacle_detected_encoder)
         if distance_traveled >= OBSTACLE_RESET_DISTANCE:
             obstacle_detection_enabled = True  # 重新启用检测
-            camera_command_pending = False  # 重置命令等待状态
+            # 移除等待状态重置，实现连续通信
             # 关闭避障巡线
             obstacle_avoidance_active = False
             obstacle_side = ""
@@ -798,8 +798,8 @@ def encoder_update(timer):
     # 摄像头通信处理 - 每10ms执行一次（与pit3定时器周期一致）
     camera_command_timer += 1
     
-    # 每50ms发送一次obs指令查询障碍物状态（避免发送过快）
-    if camera_command_timer % 5 == 0:  # 50ms间隔
+    # 每20ms发送一次obs指令查询障碍物状态（提高响应速度）
+    if camera_command_timer % 1 == 0:  # 10ms间隔
         send_camera_obs_command()
     
     # 处理摄像头返回的数据
@@ -808,10 +808,10 @@ def encoder_update(timer):
     # 检查是否需要重新启用障碍物检测
     check_obstacle_detection_reset()
     
-    # 超时处理：如果100ms没有收到响应，重置等待状态（缩短超时时间）
-    global camera_command_pending
-    if camera_command_pending and camera_command_timer % 10 == 0:  # 100ms超时
-        camera_command_pending = False
+    # 移除超时处理，实现最快响应速度
+    # global camera_command_pending
+    # if camera_command_pending and camera_command_timer % 2 == 0:  # 20ms超时
+    #     camera_command_pending = False
 
 def ccd_image_init():
     """CCD图像初始化"""
