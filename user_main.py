@@ -112,6 +112,7 @@ camera_obstacle_status = "no"  # 当前障碍物状态：left, right, no
 camera_command_timer = 0       # 命令发送定时器
 camera_receive_buffer = ""     # 接收缓冲区
 last_obstacle_message = ""     # 上次收到的障碍物消息
+camera_command_pending = False # 是否正在等待摄像头响应
 
 # CCD信息类
 class CCDInformation:
@@ -280,7 +281,8 @@ ccd.set_resolution(TSL1401.RES_12BIT)
 time.sleep_ms(500)  # CCD初始化延时
 
 # 摄像头串口通信初始化 - LPUART6 (D20-TX, D21-RX)
-uart_camera = UART(5, baudrate=115200)  # 使用与OpenMV相同的波特率
+uart_camera = UART(5)  # 使用LPUART6
+uart_camera.init(115200)  # 参考E05_uart_demo.py的初始化方式
 
 # IPS200屏幕初始化
 # 定义片选引脚
@@ -395,39 +397,48 @@ def update_wifi_parameters():
 
 def send_camera_obs_command():
     """发送obs指令到摄像头"""
+    global camera_command_pending
     try:
-        uart_camera.write("obs")
+        if not camera_command_pending:  # 只有在没有等待响应时才发送
+            uart_camera.write("obs")
+            camera_command_pending = True  # 标记正在等待响应
     except:
         pass  # 发送失败不影响主程序
 
 def process_camera_data():
     """处理摄像头数据"""
-    global camera_obstacle_status, camera_receive_buffer, last_obstacle_message
+    global camera_obstacle_status, camera_receive_buffer, last_obstacle_message, camera_command_pending
     
-    # 检查是否有数据可读
-    if uart_camera.any():
+    # 检查是否有数据可读 - 参考E05_uart_demo.py的方式
+    buf_len = uart_camera.any()
+    if buf_len:
         try:
             # 读取数据
-            received_data = uart_camera.read()
+            received_data = uart_camera.read(buf_len)
 
             if received_data:
                 # 将字节转换为字符串并添加到缓冲区
-                camera_receive_buffer += received_data.decode('utf-8', errors='ignore')
+                received_str = received_data.decode('utf-8')
+                camera_receive_buffer += received_str
                 
-                # 处理接收到的数据
                 # 检查是否包含完整的状态信息
                 if "left" in camera_receive_buffer.lower():
                     camera_obstacle_status = "left"
                     last_obstacle_message = "left"
                     camera_receive_buffer = ""  # 清空缓冲区
+                    camera_command_pending = False  # 收到响应，可以发送下一个指令
+                    set_beep_short()  # 检测到左侧障碍物时响铃
                 elif "right" in camera_receive_buffer.lower():
                     camera_obstacle_status = "right"
                     last_obstacle_message = "right"
                     camera_receive_buffer = ""  # 清空缓冲区
+                    camera_command_pending = False  # 收到响应，可以发送下一个指令
+                    set_beep_short()  # 检测到右侧障碍物时响铃
                 elif "no" in camera_receive_buffer.lower():
                     camera_obstacle_status = "no"
                     last_obstacle_message = "no"
                     camera_receive_buffer = ""  # 清空缓冲区
+                    camera_command_pending = False  # 收到响应，可以发送下一个指令
                 
                 # 处理主动发送的障碍物消息
                 if "obstacle-left" in camera_receive_buffer.lower():
@@ -444,6 +455,7 @@ def process_camera_data():
                 # 限制缓冲区大小
                 if len(camera_receive_buffer) > 50:
                     camera_receive_buffer = camera_receive_buffer[-20:]
+                    
         except:
             # 处理异常，清空缓冲区
             camera_receive_buffer = ""
@@ -745,11 +757,17 @@ def encoder_update(timer):
     # 摄像头通信处理 - 每10ms执行一次（与pit3定时器周期一致）
     camera_command_timer += 1
     
-    # 每次都发送obs指令查询障碍物状态
-    send_camera_obs_command()
+    # 每50ms发送一次obs指令查询障碍物状态（避免发送过快）
+    if camera_command_timer % 5 == 0:  # 50ms间隔
+        send_camera_obs_command()
     
     # 处理摄像头返回的数据
     process_camera_data()
+    
+    # 超时处理：如果500ms没有收到响应，重置等待状态
+    global camera_command_pending
+    if camera_command_pending and camera_command_timer % 50 == 0:  # 500ms超时
+        camera_command_pending = False
 
 def ccd_image_init():
     """CCD图像初始化"""
@@ -1618,13 +1636,13 @@ def ccd_process(timer):
         elif camera_obstacle_status == "no":
             camera_color = 0x07E0  # 绿色表示无障碍物
         
-        lcd.str12(0, 243, f"Camera:{camera_obstacle_status.upper():5s} Msg:{last_obstacle_message}", camera_color)
+        lcd.str12(0, 243, f"Camera:{camera_obstacle_status.upper():5s}", camera_color)
         
         # 第6行：当前陀螺仪Pitch显示
         lcd.str12(0, 255, f"Pitch:{imu_data_obj.Pitch:6.2f} Timer:{camera_command_timer}", 0x07E0)  # 绿色
     except:
         # 显示出错也要尝试显示基本信息
-        try:
+        try:    
             lcd.str12(0, 279, f"Ring:ERROR Key2:Clear", 0xF800)
             lcd.str12(0, 291, f"System:Display Error", 0xF800)
         except:
