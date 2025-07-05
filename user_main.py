@@ -114,6 +114,16 @@ camera_receive_buffer = ""     # 接收缓冲区
 last_obstacle_message = ""     # 上次收到的障碍物消息
 camera_command_pending = False # 是否正在等待摄像头响应
 
+# 障碍物检测控制变量
+obstacle_detection_enabled = True  # 是否启用障碍物检测
+obstacle_detected_encoder = 0.0    # 检测到障碍物时的编码器值
+OBSTACLE_RESET_DISTANCE = 14     # 检测到障碍物后需要行驶的距离才重新启用检测
+
+# 避障巡线相关变量
+obstacle_avoidance_active = False  # 是否正在执行避障巡线
+obstacle_side = ""                 # 障碍物位置："left" 或 "right"
+AVOIDANCE_OFFSET = 17              # 避障时的偏移距离（像素）
+
 # CCD信息类
 class CCDInformation:
     def __init__(self):
@@ -319,19 +329,19 @@ speed_Ki = 2E-08# 因为我觉得哈 这东西太大了会强迫快速到达预�
 speed_Kd = 0.015 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 12  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.008  # 减小平方项系数，避免过度响应
-line_kd = 600  # 适当减小微分系数，减少直线震荡
+line_kp = 10  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0  # 减小平方项系数，避免过度响应
+line_kd = 300  # 适当减小微分系数，减少直线震荡
 
 # 偏航角速度抑制参数
-gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 120  # 设置小的前进速度进行测试
+TARGET_SPEED = 100  # 设置小的前进速度进行测试
 ticker_count = 0
 gyro_z_control = 0  # 偏航角速度抑制控制输出
 
@@ -397,17 +407,21 @@ def update_wifi_parameters():
 
 def send_camera_obs_command():
     """发送obs指令到摄像头"""
-    global camera_command_pending
+    global camera_command_pending, obstacle_detection_enabled
     try:
-        if not camera_command_pending:  # 只有在没有等待响应时才发送
+        if obstacle_detection_enabled and not camera_command_pending:  # 只有在启用检测且没有等待响应时才发送
             uart_camera.write("obs")
             camera_command_pending = True  # 标记正在等待响应
+            # 调试信息：可以在屏幕上显示发送状态
+            # print("发送obs指令")  # 如果需要调试可以取消注释
     except:
         pass  # 发送失败不影响主程序
 
 def process_camera_data():
     """处理摄像头数据"""
     global camera_obstacle_status, camera_receive_buffer, last_obstacle_message, camera_command_pending
+    global obstacle_detection_enabled, obstacle_detected_encoder, encoder_integral
+    global obstacle_avoidance_active, obstacle_side
     
     # 检查是否有数据可读 - 参考E05_uart_demo.py的方式
     buf_len = uart_camera.any()
@@ -428,12 +442,24 @@ def process_camera_data():
                     camera_receive_buffer = ""  # 清空缓冲区
                     camera_command_pending = False  # 收到响应，可以发送下一个指令
                     set_beep_short()  # 检测到左侧障碍物时响铃
+                    # 检测到障碍物，禁用检测并记录当前编码器值
+                    obstacle_detection_enabled = False
+                    obstacle_detected_encoder = encoder_integral
+                    # 启用避障巡线
+                    obstacle_avoidance_active = True
+                    obstacle_side = "left"
                 elif "right" in camera_receive_buffer.lower():
                     camera_obstacle_status = "right"
                     last_obstacle_message = "right"
                     camera_receive_buffer = ""  # 清空缓冲区
                     camera_command_pending = False  # 收到响应，可以发送下一个指令
                     set_beep_short()  # 检测到右侧障碍物时响铃
+                    # 检测到障碍物，禁用检测并记录当前编码器值
+                    obstacle_detection_enabled = False
+                    obstacle_detected_encoder = encoder_integral
+                    # 启用避障巡线
+                    obstacle_avoidance_active = True
+                    obstacle_side = "right"
                 elif "no" in camera_receive_buffer.lower():
                     camera_obstacle_status = "no"
                     last_obstacle_message = "no"
@@ -459,6 +485,21 @@ def process_camera_data():
         except:
             # 处理异常，清空缓冲区
             camera_receive_buffer = ""
+
+def check_obstacle_detection_reset():
+    """检查是否需要重新启用障碍物检测"""
+    global obstacle_detection_enabled, obstacle_detected_encoder, encoder_integral, OBSTACLE_RESET_DISTANCE
+    global obstacle_avoidance_active, obstacle_side
+    
+    # 如果检测被禁用，检查是否已经行驶了足够的距离
+    if not obstacle_detection_enabled:
+        distance_traveled = abs(encoder_integral - obstacle_detected_encoder)
+        if distance_traveled >= OBSTACLE_RESET_DISTANCE:
+            obstacle_detection_enabled = True  # 重新启用检测
+            camera_command_pending = False  # 重置命令等待状态
+            # 关闭避障巡线
+            obstacle_avoidance_active = False
+            obstacle_side = ""
 
 # 卡尔曼滤波参数
 class KalmanFilter:
@@ -764,9 +805,12 @@ def encoder_update(timer):
     # 处理摄像头返回的数据
     process_camera_data()
     
-    # 超时处理：如果500ms没有收到响应，重置等待状态
+    # 检查是否需要重新启用障碍物检测
+    check_obstacle_detection_reset()
+    
+    # 超时处理：如果100ms没有收到响应，重置等待状态（缩短超时时间）
     global camera_command_pending
-    if camera_command_pending and camera_command_timer % 50 == 0:  # 500ms超时
+    if camera_command_pending and camera_command_timer % 10 == 0:  # 100ms超时
         camera_command_pending = False
 
 def ccd_image_init():
@@ -1072,6 +1116,21 @@ def middle_sideline():
     # 宽度计算
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
     Trk.width2 = Trk.right_sideline2 - Trk.left_sideline2
+    
+    # 避障中线处理 - 在所有其他特殊处理之前
+    global obstacle_avoidance_active, obstacle_side, AVOIDANCE_OFFSET
+    if obstacle_avoidance_active:
+        # 避障模式：修改中线位置实现避障
+        if obstacle_side == "left" and CCD1_right_flag:
+            # 左侧有障碍物，沿右边界减偏移距离巡线
+            Trk.middle_sideline1 = Trk.right_sideline1 - AVOIDANCE_OFFSET
+        elif obstacle_side == "right" and CCD1_left_flag:
+            # 右侧有障碍物，沿左边界加偏移距离巡线
+            Trk.middle_sideline1 = Trk.left_sideline1 + AVOIDANCE_OFFSET
+        # 如果对应边界丢失，使用基础中线计算结果
+        
+        # 避障模式下直接返回，不进行后续的环岛和十字路口处理
+        return
     
     # 元素识别关闭时，跳过所有特殊中线处理，只使用基础中线
     if not element_en:
@@ -1591,7 +1650,11 @@ def ccd_process(timer):
         
         # 画近端CCD中线 (绿色) - 始终显示
         if 0 <= int(Trk.middle_sideline1) <= 127:
-            lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
+            # 避障模式用黄色粗线，普通模式用绿色细线
+            if obstacle_avoidance_active:
+                lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0xFFE0, thick=3)  # 黄色粗线表示避障
+            else:
+                lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)  # 绿色正常
         
                 # 第1行：近端边界位置
         lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
@@ -1636,10 +1699,25 @@ def ccd_process(timer):
         elif camera_obstacle_status == "no":
             camera_color = 0x07E0  # 绿色表示无障碍物
         
-        lcd.str12(0, 243, f"Camera:{camera_obstacle_status.upper():5s}", camera_color)
+        # 显示检测状态和行驶距离
+        if obstacle_detection_enabled:
+            detection_info = "Det:ON"
+        else:
+            # 计算检测到障碍物后已行驶的距离
+            distance_traveled = abs(encoder_integral - obstacle_detected_encoder)
+            detection_info = f"Dist:{distance_traveled:.1f}"
         
-        # 第6行：当前陀螺仪Pitch显示
-        lcd.str12(0, 255, f"Pitch:{imu_data_obj.Pitch:6.2f} Timer:{camera_command_timer}", 0x07E0)  # 绿色
+        lcd.str12(0, 243, f"Camera:{camera_obstacle_status.upper():5s} {detection_info}", camera_color)
+        
+        # 第6行：避障状态和陀螺仪Pitch显示
+        if obstacle_avoidance_active:
+            avoidance_info = f"Avoid:{obstacle_side.upper()}"
+            avoidance_color = 0xFFE0  # 黄色表示正在避障
+        else:
+            avoidance_info = "Normal"
+            avoidance_color = 0x07E0  # 绿色表示正常巡线
+            
+        lcd.str12(0, 255, f"{avoidance_info} Pitch:{imu_data_obj.Pitch:5.2f}", avoidance_color)
     except:
         # 显示出错也要尝试显示基本信息
         try:    
@@ -1687,5 +1765,3 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
-
-

@@ -15,10 +15,10 @@ uart2 = UART(2, baudrate=115200)     # 初始化串口2 波特率设置为115200
 
 # 根据新的RGB统计数据重新设置阈值
 # 但这个范围太宽，我们需要更精确的黑色检测
-black_threshold = (29, 58, -12, 3, -25, 2)  # 更精确的黑色检测阈值
+black_threshold = (14, 89, -16, 14, -18, 3)  # 更精确的黑色检测阈值
 
 # 白色赛道阈值 - 用于检测障碍物周围是否有白色赛道
-white_threshold = (70, 100, -15, 15, -15, 15)  # 白色赛道检测阈值
+white_threshold = (68, 100, -27, 14, -20, 16)  # 白色赛道检测阈值
 
 # 获取图像尺寸用于位置判断
 img_width = 160  # QQVGA宽度
@@ -27,8 +27,8 @@ center_x = img_width // 2  # 图像中心x坐标
 
 # 滤波相关变量
 detection_buffer = []  # 存储最近几次的检测结果
-buffer_size = 5  # 滤波缓冲区大小，需要连续5次检测
-confirm_threshold = 4  # 确认阈值，5次中至少4次检测到才确认
+buffer_size = 1  # 滤波缓冲区大小，直接确认
+confirm_threshold = 1  # 确认阈值，检测到即确认
 last_confirmed_position = None  # 上次确认的位置
 
 # 串口数据缓冲变量
@@ -41,25 +41,25 @@ uart_buf = UARTBuffer()  # 创建缓冲区对象
 def check_track_around_obstacle(img, blob):
     """检查障碍物对侧和下方是否有白色赛道可以通行"""
     x, y, w, h = blob.rect()
-    
+
     # 定义检测区域的偏移量
     check_distance = 20  # 检测距离
-    
+
     # 判断障碍物在图像的左侧还是右侧
     obstacle_x = blob.cx()
     is_obstacle_on_left = obstacle_x < center_x
-    
+
     white_regions_found = 0
     total_regions = 0
-    
+
     # 根据障碍物位置检查对侧的白色区域
     regions_to_check = []
-    
+
     if is_obstacle_on_left:
         # 障碍物在左侧，检测右侧是否有白色赛道
         right_x = min(img_width, x + w + 5)  # 从障碍物右边开始稍微偏移
         right_region = (right_x, y, min(check_distance, img_width - right_x), h)
-        
+
         if right_region[2] > 5:  # 宽度大于5才检测
             regions_to_check.append(("right", right_region))
     else:
@@ -67,10 +67,10 @@ def check_track_around_obstacle(img, blob):
         left_x = max(0, x - check_distance - 5)  # 向左检测，稍微偏移
         left_width = min(check_distance, x - 5)
         left_region = (left_x, y, left_width, h)
-        
+
         if left_region[2] > 5:  # 宽度大于5才检测
             regions_to_check.append(("left", left_region))
-    
+
     # 添加下方白色检测区域
     bottom_y = min(img_height, y + h + 5)  # 从障碍物下方开始稍微偏移
     bottom_height = min(15, img_height - bottom_y)  # 检测下方15像素高度
@@ -83,26 +83,26 @@ def check_track_around_obstacle(img, blob):
             total_regions += 1
             try:
                 # 在该区域查找白色blob
-                white_blobs = img.find_blobs([white_threshold], 
+                white_blobs = img.find_blobs([white_threshold],
                                            roi=region,
                                            pixels_threshold=30,
                                            area_threshold=50,
                                            merge=True)
-                
+
                 if white_blobs:
                     # 计算白色区域占该方向检测区域的比例
                     total_white_area = sum(blob.area() for blob in white_blobs)
                     region_area = region[2] * region[3]
                     white_ratio = total_white_area / region_area
-                    
+
                     if white_ratio > 0.6:  # 白色区域占比超过60%认为有赛道
                         white_regions_found += 1
             except:
                 pass
-    
+
     # 需要对侧和下方都有白色赛道才认为是有效障碍物
     is_on_track = white_regions_found >= 2 and total_regions >= 2
-    
+
     return is_on_track, white_regions_found, total_regions
 
 def update_detection_buffer(obstacle_detected, position=None):
@@ -164,23 +164,23 @@ while(True):
     current_obstacle_detected = False
     current_position = None
     current_blob_data = {}  # 存储当前检测到的障碍物数据
-    
+
     for blob in blobs:
         # 面积过滤条件
-        if blob.area() > 400:
+        if blob.area() > 222 and blob.area() < 888:
             # 检查障碍物周围是否有白色赛道
             is_on_track, white_found, total_checked = check_track_around_obstacle(img, blob)
-            
+
             if is_on_track:  # 只有在赛道上的障碍物才处理
                 current_obstacle_detected = True
-                
+
                 # 判断障碍物位置（左侧还是右侧）
                 obstacle_x = blob.cx()
                 if obstacle_x < center_x:
                     current_position = "LEFT"
                 else:
                     current_position = "RIGHT"
-                
+
                 # 存储当前检测的障碍物信息
                 current_blob_data = {
                     'blob': blob,
@@ -188,12 +188,12 @@ while(True):
                     'cx': obstacle_x,
                     'cy': blob.cy()
                 }
-                
+
                 break  # 只处理第一个检测到的有效障碍物
-    
+
             # 使用滤波机制确认检测结果
     confirmed, confirmed_position = update_detection_buffer(current_obstacle_detected, current_position)
-    
+
     # 检查串口指令
     uart_num = uart2.any()  # 获取当前串口数据数量
     if uart_num:
@@ -202,10 +202,10 @@ while(True):
         try:
             received_str = received_data.decode('utf-8')
             print("收到数据片段:", repr(received_str))  # 调试输出，使用repr显示特殊字符
-            
+
             # 累积到缓冲区
             uart_buf.data += received_str
-            
+
             # 检查是否包含完整的指令
             if "obs" in uart_buf.data:
                 print("检测到完整obs指令")  # 调试输出
@@ -225,17 +225,17 @@ while(True):
                 # 保留最后10个字符，防止指令跨越清理边界
                 uart_buf.data = uart_buf.data[-10:]
                 print("缓冲区过长，清理保留:", repr(uart_buf.data))
-                
+
         except:
             print("数据解码失败:", received_data)  # 调试输出
-    
+
     # 只有在确认检测到障碍物且当前确实有检测结果且位置一致时才绘制
     if confirmed and current_obstacle_detected and current_blob_data and current_blob_data['position'] == confirmed_position:
         # 使用当前检测到的障碍物数据
         blob = current_blob_data['blob']
         obstacle_x = current_blob_data['cx']
         obstacle_y = current_blob_data['cy']
-        
+
         # 设置颜色
         if confirmed_position == "LEFT":
             text_color = (0, 0, 255)  # 蓝色文字表示左侧
@@ -246,29 +246,29 @@ while(True):
 
         # 绘制障碍物检测框
         img.draw_rectangle(blob.rect(), color=rect_color, thickness=2)
-        
+
         # 绘制障碍物中心点
         img.draw_circle(obstacle_x, obstacle_y, 5, color=rect_color, thickness=2)
-        
+
         # 绘制十字标记中心点
         img.draw_line(obstacle_x-8, obstacle_y, obstacle_x+8, obstacle_y, color=rect_color, thickness=2)
         img.draw_line(obstacle_x, obstacle_y-8, obstacle_x, obstacle_y+8, color=rect_color, thickness=2)
-        
+
         # 绘制位置文字
         img.draw_string(obstacle_x-15, obstacle_y-25, confirmed_position, color=text_color, scale=1)
-        
+
         # 绘制障碍物信息（面积、坐标）
         info_text = f"Area:{blob.area()}"
         img.draw_string(obstacle_x-20, obstacle_y+15, info_text, color=text_color, scale=1)
-        
+
         coord_text = f"({obstacle_x},{obstacle_y})"
         img.draw_string(obstacle_x-25, obstacle_y+25, coord_text, color=text_color, scale=1)
-        
+
         # 显示滤波状态
         filter_text = f"Confirmed"
         img.draw_string(obstacle_x-25, obstacle_y+35, filter_text, color=(0, 255, 0), scale=1)
-    
+
     # 绘制图像中心线作为参考
     img.draw_line(center_x, 0, center_x, img_height-1, color=(255, 255, 255), thickness=2)  # 白色中心线
-    
+
 
