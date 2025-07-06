@@ -7,10 +7,10 @@ import time
 import math
 
 # wifi开关
-wifi_en = False 
+wifi_en = True 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = True  # False: 只巡线，True: 检测元素
+element_en = False  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -22,7 +22,9 @@ if wifi_en:
         time.sleep_ms(500)
         wifi_enabled = True
         print("WiFi调参模块初始化成功")
-    except:
+    except Exception as e:
+        print(e)
+        print("WiFi调参模块初始化失败")
         wifi_enabled = False
 else:
     wifi_enabled = False
@@ -308,11 +310,11 @@ roll_angle_Ki = 0
 roll_angle_Kd = 0.7481 #0.0826 
 
 speed_Kp = 0.031 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 2E-08# 因为我觉得哈 这东西太大了会强迫快速到达预定速度 但是拐弯的时候就容易低头冲出去 而且震荡大
+speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
 speed_Kd = 0.015 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 11.2  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 10.8  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0  # 减小平方项系数，避免过度响应
 line_kd = 500  # 适当减小微分系数，减少直线震荡
 
@@ -321,7 +323,7 @@ original_line_kp = line_kp
 original_line_kd = line_kd
 
 # 环岛线路跟踪参数
-ring_line_kp = 10.6   # 环岛内部线路跟踪比例系数
+ring_line_kp = 10   # 环岛内部线路跟踪比例系数
 ring_line_kd = 400  # 环岛内部线路跟踪微分系数
 
 # 偏航角速度抑制参数
@@ -350,15 +352,24 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - CCD阈值参数
-wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, speed_Kp, line_kp, line_kd, TARGET_SPEED]
+# WiFi调参数据存储 - PID控制参数
+# 确保使用绝对值，因为angle_kp和angle_kd是负数
+wifi_data = [abs(angle_kp), abs(angle_kd), roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, line_kp, line_kd]
 
 def update_wifi_parameters():
-    """更新WiFi调参数据"""
+    """更新WiFi调参数据
+    通道0: angle_kp (角速度环比例)
+    通道1: angle_kd (角速度环微分)
+    通道2: roll_angle_Kp (角度环比例)
+    通道3: roll_angle_Kd (角度环微分)
+    通道4: speed_Kp (速度环比例)
+    通道5: speed_Kd (速度环微分)
+    通道6: line_kp (线路跟踪比例)
+    通道7: line_kd (线路跟踪微分)
+    """
     global line_kp, line_squart_kp, line_kd, roll_angle_Kp, roll_angle_Kd
     global speed_Kp, speed_Ki, speed_Kd, angle_kp, angle_kd, TARGET_SPEED, gyro_z_control
     global pid_angle_speed, pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
-    global THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2
     
     if not wifi_enabled:
         return
@@ -372,27 +383,30 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新CCD阈值参数
-        THRESHOLD_MULTIPLE_1 = wifi_data[0]  # 近端CCD梯度检测阈值倍数
-        THRESHOLD_MULTIPLE_2 = wifi_data[1]  # 远端CCD梯度检测阈值倍数
-        THRESHOLD_1 = wifi_data[2]           # 近端CCD二值化阈值百分比
-        THRESHOLD_2 = wifi_data[3]           # 远端CCD二值化阈值百分比
+        # 更新PID控制参数
+        angle_kp = -abs(wifi_data[0])        # 角速度环比例控制（保持负数）
+        angle_kd = -abs(wifi_data[1])        # 角速度环微分控制（保持负数）
+        roll_angle_Kp = wifi_data[2]         # 角度环比例控制
+        roll_angle_Kd = wifi_data[3]         # 角度环微分控制
         speed_Kp = wifi_data[4]              # 速度环比例控制
-        line_kp = wifi_data[5]               # 线路跟踪比例控制
-        line_kd = wifi_data[6]               # 线路跟踪微分控制
-        TARGET_SPEED = wifi_data[7]          # 目标速度
+        speed_Kd = wifi_data[5]              # 速度环微分控制
+        line_kp = wifi_data[6]               # 线路跟踪比例控制
+        line_kd = wifi_data[7]               # 线路跟踪微分控制
         
         # 更新PID控制器参数
+        pid_angle_speed.kp = angle_kp
+        pid_angle_speed.kd = angle_kd
+        pid_angle.kp = roll_angle_Kp
+        pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
-        
-        # 更新线路跟踪PD控制器参数
+        pid_speed.kd = speed_Kd
         pid_line.kp = line_kp
         pid_line.kd = line_kd
         
-        # 发送示波器数据 - 显示CCD和控制相关信息
+        # 发送示波器数据 - 显示控制相关信息
         wifi.send_oscilloscope(
-            line_deviation, line_control_output, THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2,
-            THRESHOLD_1, THRESHOLD_2, motor1, motor2)
+            -(kalman_l.output + kalman_r.output) / 2, TARGET_SPEED, line_kp, line_kd,
+            speed_1, angle_1, motor1, motor2)
     
     except:
         pass
@@ -421,6 +435,8 @@ class PIDController:
     def update(self, setpoint, current):
         err = setpoint - current
         self.err_sum += err
+        # 限制积分项，防止积分饱和
+        self.err_sum = max(-1000, min(1000, self.err_sum))
         err_diff = err - self.err_last
         output = self.kp * err + self.ki * self.err_sum + self.kd * err_diff
         self.err_last = err
@@ -667,9 +683,10 @@ def control_loop(timer):
     if ticker_count == 5:
         avg_speed = -(kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
-        speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
-    if count_time == 0:
-        pid_speed.err_sum=0;
+        speed_1 = limit(speed_1, -30, 30)  # 限制角度偏移
+    # 移除定期清零速度积分项，避免速度控制不稳定
+    # if count_time == 0:
+    #     pid_speed.err_sum=0;
 
 def encoder_update(timer):
     global encoder_integral
@@ -1016,10 +1033,10 @@ def middle_sideline():
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 38
+                Trk.middle_sideline1 = Trk.left_sideline1 + 35 
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + 38
+                Trk.middle_sideline1 = Trk.left_sideline1_last + 35
         elif ring_state == OUT_RING:
             Trk.middle_sideline1 = Trk.right_sideline1 - 36
     
@@ -1132,7 +1149,7 @@ def ring_detection():
         
         if not CCD2_left_flag and CCD1_left_flag and Trk.right_qulu <= RING_QULU_THRESHOLD:
             ring_state = READY_IN_RING
-            set_beep_double_short()  # 确认环岛：短响两声
+            set_beep_short()  # 确认环岛：短响
             # 只降低近端CCD1阈值，提高边界检测灵敏度
             global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line
             THRESHOLD_MULTIPLE_1 = ring_threshold_1
@@ -1155,7 +1172,7 @@ def ring_detection():
         
         if not CCD2_right_flag and CCD1_right_flag and Trk.left_qulu <= RING_QULU_THRESHOLD:
             ring_state = READY_IN_RING
-            set_beep_double_short()  # 确认环岛：短响两声
+            set_beep_short()  # 确认环岛：短响
             # 只降低近端CCD1阈值，提高边界检测灵敏度
             global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line
             THRESHOLD_MULTIPLE_1 = ring_threshold_1
@@ -1178,15 +1195,17 @@ def ring_detection():
         if ring_left and abs(ring_encoder - encoder_integral) > 25:
             ring_state = IN_RING
             set_beep_long()  # 进入环岛：长响一声
-            # 修改目标速度为环岛专用速度
+            # 修改目标速度为环岛专用速度，并清零速度积分项避免突变
             global TARGET_SPEED
             TARGET_SPEED = ring_target_speed
+            pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
         elif ring_right and abs(ring_encoder - encoder_integral) > 25:
             ring_state = IN_RING
             set_beep_long()  # 进入环岛：长响一声
-            # 修改目标速度为环岛专用速度
+            # 修改目标速度为环岛专用速度，并清零速度积分项避免突变
             global TARGET_SPEED
             TARGET_SPEED = ring_target_speed
+            pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
         elif abs(ring_encoder - encoder_integral) > 60:   
             ring_state = NO_RING
             ring_left = False
@@ -1203,7 +1222,7 @@ def ring_detection():
     elif ring_state == IN_RING:
         # 阶段3→4：在环岛中 -> 准备出环岛
         # 条件：根据环岛方向检测不同的边界条件
-        if (ring_left and Trk.right_sideline1 > 104) or (ring_right and Trk.left_sideline1 < 15):
+        if (ring_left and Trk.right_sideline1 > 102) or (ring_right and Trk.left_sideline1 < 15):
             # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
@@ -1251,6 +1270,7 @@ def ring_detection():
         pid_line.kp = line_kp
         pid_line.kd = line_kd
         TARGET_SPEED = original_target_speed
+        pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
         
         # 记录环岛结束时的编码器值，用于延时
         global cross_delay_encoder
@@ -1367,6 +1387,7 @@ def clear_ring_flag():
     pid_line.kd = line_kd
     # 恢复目标速度
     TARGET_SPEED = original_target_speed
+    pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
     # 注意：不清零encoder_integral，保持全局距离累积
 
 def ccd_processing(ccd_data1, ccd_data2):
@@ -1552,8 +1573,11 @@ def ccd_process(timer):
         
         lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
-        # 第5行：当前陀螺仪Pitch显示
-        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:6.2f}", 0x07E0)  # 绿色
+        # 第5行：角速度环和角度环PID参数
+        lcd.str12(0, 243, f"aKp:{angle_kp} aKd:{angle_kd} rKp:{roll_angle_Kp:.3f} rKd:{roll_angle_Kd:.3f}", 0x07E0)  # 绿色
+        
+        # 第6行：速度环和线路跟踪PID参数
+        lcd.str12(0, 255, f"sKp:{speed_Kp:.3f} sKd:{speed_Kd:.3f} lKp:{line_kp:.1f} lKd:{line_kd}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
