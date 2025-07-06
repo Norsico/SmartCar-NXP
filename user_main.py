@@ -7,10 +7,10 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = False  # False: 只巡线，True: 检测元素
+element_en = True  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -334,7 +334,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 120  # 设置小的前进速度进行测试
+TARGET_SPEED = 50  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -1016,12 +1016,35 @@ def middle_sideline():
     if not element_en:
         return
     
-    # 十字路口中线特殊处理 - 参考C代码注释
-    # 十字路口期间，使用检测到十字路口时保存的中线值直行通过
-    # 不再动态调整方向，避免受到CCD丢线影响
+    # 十字路口中线特殊处理 - 根据赛道状况选择巡线策略
+    # 检测到十字路口后的巡线策略：
+    # 1. 如果近端赛道没变宽，按照近端巡线
+    # 2. 如果近端变宽了，并且远端两端都没丢线，尝试远端巡线
+    # 3. 如果都不满足，就直走
     if cross_flag:
-        # 十字路口状态下，直接使用保存的中线值直行
-        Trk.middle_sideline1 = cross_middle_line
+        # 计算近端和远端赛道宽度
+        width1 = Trk.right_sideline1 - Trk.left_sideline1  # 近端宽度
+        width2 = Trk.right_sideline2 - Trk.left_sideline2  # 远端宽度
+        
+        # 判断近端赛道是否变宽（与正常赛道宽度比较）
+        normal_width = 100  # 正常赛道宽度阈值，可根据实际情况调整
+        near_wide = width1 > normal_width  # 近端是否变宽
+        
+        # 判断远端是否双边都有效
+        far_both_valid = CCD2_left_flag and CCD2_right_flag
+        
+        if not near_wide:
+            # 策略1：近端赛道没变宽，按照近端巡线
+            # 使用基础中线计算结果，不做特殊处理
+            pass  # Trk.middle_sideline1 已经在基础计算中得到
+        elif near_wide and far_both_valid:
+            # 策略2：近端变宽了，并且远端两端都没丢线，尝试远端巡线
+            # 使用远端CCD的中线进行巡线
+            Trk.middle_sideline1 = Trk.middle_sideline2
+        else:
+            # 策略3：都不满足条件，直走
+            # 使用检测到十字路口时保存的中线值直行通过
+            Trk.middle_sideline1 = cross_middle_line
     
     # 环岛中线特殊处理 - 参考C代码逻辑
     # 左环岛处理
@@ -1063,10 +1086,6 @@ def middle_sideline():
                 # 左边界也丢失时，保持上次中线
                 pass
     
-    # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
-    # if cross_flag:
-    #     Trk.middle_sideline1 = Trk.middle_sideline2
-    
     # 对middle_sideline1进行低通滤波，减少噪声和突变
     global middle_line_filtered, middle_line_filter_alpha
     middle_line_filtered = middle_line_filter_alpha * Trk.middle_sideline1 + (1 - middle_line_filter_alpha) * middle_line_filtered
@@ -1084,7 +1103,7 @@ def ring_detection():
     global ring_encoder, ring_angle, encoder_integral
     global imu_data_obj  # 使用IMU数据
     
-    if ring_state == NO_RING:
+    if ring_state == NO_RING and not cross_flag:
         # 检测左环岛 - 阶段1：远端左侧丢线，近端左侧不丢线
         # 条件：远端CCD左侧丢线 + 近端CCD左侧不丢线 + 远端不是全黑
         if (CCD1_right_flag and CCD2_right_flag and not CCD2_left_flag and CCD1_left_flag and Trk.right_qulu <= 15):
@@ -1113,7 +1132,7 @@ def ring_detection():
             ring_state = FIND_RING_STAGE2
             set_beep_short()  # 第二阶段完成：短响一声
             
-        elif abs(ring_encoder - encoder_integral) >= 10 or Trk.right_qulu >= 22:  # 如果走了太远还没满足条件，可能是误判
+        elif abs(ring_encoder - encoder_integral) >= 10 or Trk.right_qulu >= 22 or (not CCD2_left_flag and not CCD2_right_flag):  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_left = False
             # 恢复近端CCD原始阈值
@@ -1298,13 +1317,9 @@ def cross_detection():
     # 4. 远端CCD赛道很宽（表示前方有分叉）
     # 5. 前后端都不是黑色场景
     # 6. 当前没有十字路口标志
-    if (ring_state == NO_RING and  # 关键：只有在无环岛状态时才检测十字路口
-        not ring_left and not ring_right and  # 确保没有环岛标志
-        ring_end_delay_ok and  # 环岛结束后延时检查
-        Trk.left_sideline2 < 17 and Trk.right_sideline2 > 102 and
-        abs(Trk.left_sideline1 - Trk.right_sideline1) < 50 and 
-        abs(Trk.left_sideline2 - Trk.right_sideline2) > 90 and 
-        not black_write_1 and not black_write_2 and
+    if (not ring_left and not ring_right and  # 确保没有环岛标志
+        # ring_end_delay_ok and  # 环岛结束后延时检查
+        not CCD2_left_flag and not CCD2_right_flag and
         not cross_flag):
         
         # 检测到十字路口
@@ -1350,10 +1365,10 @@ def element_detection():
     if not cross_flag:  # 十字路口期间不检测环岛
         ring_detection()
     
-    # # 十字路口检测 - 只有在完全无环岛状态且无环岛标志时才检测
-    # # 这样可以避免出环岛阶段的误判
-    # if (ring_state == NO_RING and not ring_left and not ring_right):
-    #     cross_detection()
+    # 十字路口检测 - 只有在完全无环岛状态且无环岛标志时才检测
+    # 这样可以避免出环岛阶段的误判
+    if (ring_state == NO_RING and not ring_left and not ring_right):
+        cross_detection()
 
 
 def clear_ring_flag():
@@ -1551,7 +1566,7 @@ def ccd_process(timer):
         right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
         lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
         
-        # 第4行：环岛状态显示
+        # 第4行：环岛状态和十字路口状态显示
         ring_status = ""
         if ring_state == NO_RING: ring_status = "NoRing"
         elif ring_state == FIND_RING: ring_status = "FOUND"
@@ -1566,12 +1581,36 @@ def ccd_process(timer):
         if ring_left: ring_dir = "L"
         elif ring_right: ring_dir = "R"
         
+        # 十字路口状态和巡线策略显示
+        cross_status = ""
+        if cross_flag:
+            # 计算当前十字路口的巡线策略
+            width1 = Trk.right_sideline1 - Trk.left_sideline1  # 近端宽度
+            normal_width = 60  # 正常赛道宽度阈值
+            near_wide = width1 > normal_width  # 近端是否变宽
+            far_both_valid = CCD2_left_flag and CCD2_right_flag  # 远端是否双边都有效
+            
+            if not near_wide:
+                cross_status = "Cross:Near"  # 近端巡线
+            elif near_wide and far_both_valid:
+                cross_status = "Cross:Far"   # 远端巡线
+            else:
+                cross_status = "Cross:Str"   # 直走
+        
         # 显示编码器距离信息
         encoder_info = ""
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
+        elif cross_flag:
+            encoder_info = f" E:{abs(cross_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
+        # 组合显示信息
+        status_info = f"Ring:{ring_status}{ring_dir}{encoder_info}"
+        if cross_status:
+            status_info += f" {cross_status}"
+        status_info += " K2:Clr K1:Elm"
+        
+        lcd.str12(0, 231, status_info, 0xF800)  # 红色
         
         # 第5行：角速度环、角度环和目标速度
         lcd.str12(0, 243, f"aKp:{angle_kp} aKd:{angle_kd} rKp:{roll_angle_Kp:.3f} TgtSpd:{TARGET_SPEED}", 0x07E0)  # 绿色
