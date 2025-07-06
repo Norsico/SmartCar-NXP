@@ -301,22 +301,22 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1330 #测过了 两个都是负的 kd不是正的
+angle_kp = -1339 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -215
+angle_kd = -248
 
-roll_angle_Kp = 0.511 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.514 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.7481 #0.0826 
+roll_angle_Kd = 0.8190001 #0.0826 
 
-speed_Kp = 0.031 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.099 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.015 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.18 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 10.8  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 11.02  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 500  # 适当减小微分系数，减少直线震荡
+line_kd = 365  # 适当减小微分系数，减少直线震荡
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -334,7 +334,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 90  # 设置小的前进速度进行测试
+TARGET_SPEED = 120  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -1573,11 +1573,11 @@ def ccd_process(timer):
         
         lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
         
-        # 第5行：角速度环和角度环PID参数
-        lcd.str12(0, 243, f"aKp:{angle_kp} aKd:{angle_kd} rKp:{roll_angle_Kp:.3f} rKd:{roll_angle_Kd:.3f}", 0x07E0)  # 绿色
+        # 第5行：角速度环、角度环和目标速度
+        lcd.str12(0, 243, f"aKp:{angle_kp} aKd:{angle_kd} rKp:{roll_angle_Kp:.3f} TgtSpd:{TARGET_SPEED}", 0x07E0)  # 绿色
         
-        # 第6行：速度环和线路跟踪PID参数
-        lcd.str12(0, 255, f"sKp:{speed_Kp:.3f} sKd:{speed_Kd:.3f} lKp:{line_kp:.1f} lKd:{line_kd}", 0x07FF)  # 青色
+        # 第6行：速度环、线路跟踪PID参数和固定的角度环微分
+        lcd.str12(0, 255, f"sKp:{speed_Kp:.3f} sKd:{speed_Kd:.3f} lKp:{line_kp:.1f} rKd:{roll_angle_Kd:.3f}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
