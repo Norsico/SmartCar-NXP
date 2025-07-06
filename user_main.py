@@ -80,7 +80,7 @@ original_threshold_1 = THRESHOLD_MULTIPLE_1  # 保存原始阈值
 ring_threshold_1 = 18  # 环岛内部使用的较小阈值
 
 # 环岛检测阈值 - 参考C代码调整
-RING_QULU_THRESHOLD = 15  # 环岛曲率检测阈值（参考代码使用12）
+RING_QULU_THRESHOLD = 13  # 环岛曲率检测阈值（参考代码使用12）
 
 # 环岛各阶段参数 - 需要根据实际测试调整
 READY_IN_RING_ENCODER = 32     # 进入环岛前的编码器距离（增大，因为积分值会更大）
@@ -244,14 +244,14 @@ def beep_process():
             else:
                 beep_off()
                 beep_double_count = 1
-                beep_timer = 5  # 间隔100ms
+                beep_timer = 2  # 间隔40ms
         elif beep_double_count == 1:  # 间隔
             if beep_timer > 0:
                 beep_off()
                 beep_timer -= 1
             else:
                 beep_double_count = 2
-                beep_timer = 5  # 第二声短响100ms
+                beep_timer = 3  # 第二声短响60ms
         elif beep_double_count == 2:  # 第二声短响
             if beep_timer > 0:
                 beep_on()
@@ -1060,10 +1060,7 @@ def middle_sideline():
 
 def ring_detection():
     """
-    环岛检测 - 添加准备进入环岛状态
-    0. NO_RING: 无环岛状态
-    1. FIND_RING: 发现环岛（左侧丢线+右侧曲率小）
-    2. READY_IN_RING: 准备进入环岛（确认环岛并记录参数）
+    环岛检测
     """
     global ring_state, ring_left, ring_right
     global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
@@ -1119,13 +1116,13 @@ def ring_detection():
         # 阶段1→2：右环岛确认第一阶段
         # 条件1：编码器距离足够 + 前后端CCD拍摄宽度小于40
         
-        if 13 < abs(ring_encoder - encoder_integral) < 20 and Trk.left_qulu <= RING_QULU_THRESHOLD:
+        if 12 <= abs(ring_encoder - encoder_integral) < 15 and Trk.left_qulu <= RING_QULU_THRESHOLD:
             # 记录第一阶段完成的编码器值
             ring_encoder = encoder_integral
             ring_state = FIND_RING_STAGE2
             set_beep_short()  # 第一阶段完成：短响一声
             
-        elif Trk.left_qulu > 30 or abs(ring_encoder - encoder_integral) >= 18:  # 左侧曲率过大，可能是误判
+        elif Trk.left_qulu >= 25 or abs(ring_encoder - encoder_integral) >= 15:  # 左侧曲率过大，可能是误判
             ring_state = NO_RING
             ring_right = False
             # 恢复近端CCD原始阈值
