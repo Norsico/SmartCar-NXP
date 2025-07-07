@@ -59,8 +59,8 @@ THRESHOLD_MULTIPLE_2 = 38  # 远端适中
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
 # - 值越小越容易判断为黑色场景
-THRESHOLD_1 = 40          # 二值化较松
-THRESHOLD_2 = 40
+THRESHOLD_1 = 2400      
+THRESHOLD_2 = 2090
 
 # 环岛状态定义 - 参考C代码的7阶段状态机
 NO_RING = 0            # 无环岛
@@ -334,7 +334,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 100  # 设置小的前进速度进行测试
+TARGET_SPEED = 80  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -352,24 +352,19 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - PID控制参数
-# 确保使用绝对值，因为angle_kp和angle_kd是负数
-wifi_data = [abs(angle_kp), abs(angle_kd), roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, line_kp, line_kd]
+# WiFi调参数据存储 - CCD阈值参数
+wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, 0, 0, 0, 0]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
-    通道0: angle_kp (角速度环比例)
-    通道1: angle_kd (角速度环微分)
-    通道2: roll_angle_Kp (角度环比例)
-    通道3: roll_angle_Kd (角度环微分)
-    通道4: speed_Kp (速度环比例)
-    通道5: speed_Kd (速度环微分)
-    通道6: line_kp (线路跟踪比例)
-    通道7: line_kd (线路跟踪微分)
+    通道0: THRESHOLD_MULTIPLE_1 (近端CCD梯度检测阈值倍数)
+    通道1: THRESHOLD_MULTIPLE_2 (远端CCD梯度检测阈值倍数)
+    通道2: THRESHOLD_1 (近端CCD二值化阈值百分比)
+    通道3: THRESHOLD_2 (远端CCD二值化阈值百分比)
+    通道4-7: 保留未使用
     """
-    global line_kp, line_squart_kp, line_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Ki, speed_Kd, angle_kp, angle_kd, TARGET_SPEED, gyro_z_control
-    global pid_angle_speed, pid_angle, pid_speed, pid_line, wifi_data, motor1, motor2
+    global THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2
+    global wifi_data, motor1, motor2
     
     if not wifi_enabled:
         return
@@ -383,30 +378,16 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新PID控制参数
-        angle_kp = -abs(wifi_data[0])        # 角速度环比例控制（保持负数）
-        angle_kd = -abs(wifi_data[1])        # 角速度环微分控制（保持负数）
-        roll_angle_Kp = wifi_data[2]         # 角度环比例控制
-        roll_angle_Kd = wifi_data[3]         # 角度环微分控制
-        speed_Kp = wifi_data[4]              # 速度环比例控制
-        speed_Kd = wifi_data[5]              # 速度环微分控制
-        line_kp = wifi_data[6]               # 线路跟踪比例控制
-        line_kd = wifi_data[7]               # 线路跟踪微分控制
+        # 更新CCD阈值参数
+        THRESHOLD_MULTIPLE_1 = int(wifi_data[0])  # 近端CCD梯度检测阈值倍数
+        THRESHOLD_MULTIPLE_2 = int(wifi_data[1])  # 远端CCD梯度检测阈值倍数
+        THRESHOLD_1 = int(wifi_data[2])           # 近端CCD二值化阈值百分比
+        THRESHOLD_2 = int(wifi_data[3])           # 远端CCD二值化阈值百分比
         
-        # 更新PID控制器参数
-        pid_angle_speed.kp = angle_kp
-        pid_angle_speed.kd = angle_kd
-        pid_angle.kp = roll_angle_Kp
-        pid_angle.kd = roll_angle_Kd
-        pid_speed.kp = speed_Kp
-        pid_speed.kd = speed_Kd
-        pid_line.kp = line_kp
-        pid_line.kd = line_kd
-        
-        # 发送示波器数据 - 显示控制相关信息
+        # 发送示波器数据 - 显示CCD相关信息
         wifi.send_oscilloscope(
-            -(kalman_l.output + kalman_r.output) / 2, TARGET_SPEED, line_kp, line_kd,
-            speed_1, angle_1, motor1, motor2)
+            CCD1.aver, CCD2.aver, CCD1.bin_thrd, CCD2.bin_thrd,
+            int(black_write_1), int(black_write_2), motor1, motor2)
     
     except:
         pass
@@ -761,11 +742,8 @@ def ccd1_get(ccd_data):
     if count > 0:
         CCD1.aver = total // count
     
-    # 二值化阈值计算
-    if CCD1.bin_thrd == 0:
-        CCD1.bin_thrd = 1
-    elif CCD1.bin_thrd == 1:
-        CCD1.bin_thrd = (CCD1.aver * THRESHOLD_1) // 100
+    # 二值化阈值计算 - 直接使用THRESHOLD_1作为固定阈值
+    CCD1.bin_thrd = THRESHOLD_1
     
     # 动态阈值计算
     if CCD1.max_val + CCD1.min_val > 0:
@@ -800,11 +778,8 @@ def ccd2_get(ccd_data):
     if count > 0:
         CCD2.aver = total // count
     
-    # 二值化阈值计算
-    if CCD2.bin_thrd == 0:
-        CCD2.bin_thrd = 1
-    elif CCD2.bin_thrd == 1:
-        CCD2.bin_thrd = (CCD2.aver * THRESHOLD_2) // 100
+    # 二值化阈值计算 - 直接使用THRESHOLD_2作为固定阈值
+    CCD2.bin_thrd = THRESHOLD_2
     
     # 动态阈值计算
     if CCD2.max_val + CCD2.min_val > 0:
@@ -1571,13 +1546,12 @@ def ccd_process(timer):
         if ring_state != NO_RING:
             encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
         
-        lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info} K2:Clr K1:Elm", 0xF800)  # 红色
+        lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info}", 0xF800)  # 红色
         
-        # 第5行：角速度环、角度环和目标速度
-        lcd.str12(0, 243, f"aKp:{angle_kp} aKd:{angle_kd} rKp:{roll_angle_Kp:.3f} TgtSpd:{TARGET_SPEED}", 0x07E0)  # 绿色
-        
-        # 第6行：速度环、线路跟踪PID参数和固定的角度环微分
-        lcd.str12(0, 255, f"sKp:{speed_Kp:.3f} sKd:{speed_Kd:.3f} lKp:{line_kp:.1f} rKd:{roll_angle_Kd:.3f}", 0x07FF)  # 青色
+        # 第6行：黑白二值化状态
+        bw1_status = "hei" if black_write_1 else "bai"
+        bw2_status = "hei" if black_write_2 else "bai"
+        lcd.str12(0, 243, f"Jin1:{bw1_status} Yuan2:{bw2_status}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
