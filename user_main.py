@@ -10,7 +10,7 @@ import math
 wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = False  # False: 只巡线，True: 检测元素
+element_en = True  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -104,10 +104,13 @@ cross_flag = False      # 十字路口标志
 cross_encoder = 0       # 十字路口编码器计数
 cross_delay_encoder = 0 # 环岛结束后的延时编码器值
 cross_middle_line = MIDDLE_LINE  # 检测到十字路口时保存的中线值
+pre_cross_flag = False  # 预十字标志
+pre_cross_encoder = 0   # 预十字编码器计数
 
 # 十字路口参数 - 需要调试优化
-CROSS_ENCODER = 30      # 十字路口编码器距离阈值（参考值）
+CROSS_ENCODER = 20      # 十字路口编码器距离阈值（参考值）
 CROSS_DELAY = 40        # 环岛结束后延时距离，避免误检测
+PRE_CROSS_ENCODER = 10  # 预十字编码器距离阈值
 
 # CCD信息类
 class CCDInformation:
@@ -991,12 +994,17 @@ def middle_sideline():
     if not element_en:
         return
     
-    # 十字路口中线特殊处理 - 参考C代码注释
-    # 十字路口期间，使用检测到十字路口时保存的中线值直行通过
-    # 不再动态调整方向，避免受到CCD丢线影响
+    # 十字路口中线特殊处理
+    # 十字路口期间，根据边界情况选择循迹策略
     if cross_flag:
-        # 十字路口状态下，直接使用保存的中线值直行
-        Trk.middle_sideline1 = cross_middle_line
+        # 检查远端和近端是否都有边界
+        if CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag:
+            # 远端和近端都有边界，使用平均中线来循迹
+            Trk.middle_sideline1 = (Trk.middle_sideline1 + Trk.middle_sideline2) / 2.0
+        else:
+            # 没有四边界情况，使用近端中线
+            # 这里已经在基础中线计算中完成了，不需要额外处理
+            pass
     
     # 环岛中线特殊处理 - 参考C代码逻辑
     # 左环岛处理
@@ -1255,53 +1263,58 @@ def ring_detection():
 
 
 def cross_detection():
-    """十字路口检测 - 移植自C语言参考代码"""
+    """十字路口检测 - 移植参考代码的检测策略"""
     global cross_flag, cross_encoder, encoder_integral
-    global CCD1_left_flag, CCD1_right_flag, black_write_1, black_write_2
-    global ring_state, ring_left, ring_right  # 添加环岛状态检查
-    global cross_delay_encoder  # 添加延时检查
+    global pre_cross_flag, pre_cross_encoder
+    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
+    global ring_state, ring_left, ring_right
+    global cross_delay_encoder, black_write_2
     
-    # 检查环岛结束后的延时
-    # 如果刚结束环岛，需要等待一段距离后才能检测十字路口
-    ring_end_delay_ok = (cross_delay_encoder == 0 or 
-                        abs(encoder_integral - cross_delay_encoder) > CROSS_DELAY)
     
-    # 十字路口检测条件：
-    # 1. 当前没有环岛状态（避免出环岛时误判为十字路口）
-    # 2. 环岛结束后已经等待足够距离
-    # 3. 近端CCD双边都丢线或赛道很窄
-    # 4. 远端CCD赛道很宽（表示前方有分叉）
-    # 5. 前后端都不是黑色场景
-    # 6. 当前没有十字路口标志
-    if (ring_state == NO_RING and  # 关键：只有在无环岛状态时才检测十字路口
-        not ring_left and not ring_right and  # 确保没有环岛标志
-        ring_end_delay_ok and  # 环岛结束后延时检查
-        Trk.left_sideline2 < 17 and Trk.right_sideline2 > 102 and
-        abs(Trk.left_sideline1 - Trk.right_sideline1) < 50 and 
-        abs(Trk.left_sideline2 - Trk.right_sideline2) > 90 and 
-        not black_write_1 and not black_write_2 and
-        not cross_flag):
+    # 预十字检测条件：
+    # 1. 当前没有环岛状态
+    # 2. 远端CCD双边都丢线且不是黑色场景
+    # 3. 近端CCD双边都有线
+    # 4. 当前没有十字路口标志和预十字标志
+    if (ring_state == NO_RING and
+        not CCD2_left_flag and not CCD2_right_flag and not black_write_2 and
+        CCD1_left_flag and CCD1_right_flag and
+        not cross_flag and not pre_cross_flag):
+        # 检测到预十字
+        pre_cross_flag = True
+        pre_cross_encoder = encoder_integral  # 记录预十字检测时的编码器值
         
-        # 检测到十字路口
-        cross_flag = True
-        set_beep_short()  # 十字路口：短响
+    # 预十字状态处理
+    if pre_cross_flag:
+        # 检查近端CCD宽度是否大于100
+        width1 = Trk.right_sideline1 - Trk.left_sideline1
         
-        # 保存检测到十字路口时的中线值，后续直行使用
-        global cross_middle_line
-        cross_middle_line = Trk.middle_sideline1
-        
-        # 记录当前编码器值（参考C代码：encoder_integral=100）
-        # 这里保持当前积分值，记录检测点
-        cross_encoder = encoder_integral
+        if width1 > 100:
+            # 宽度大于100，置为发现十字，开始十字路口模式
+            pre_cross_flag = False  # 清除预十字标志
+            cross_flag = True       # 设置十字路口标志
+            set_beep_short()        # 十字路口：短响
+            
+            # 保存检测到十字路口时的中线值，后续直行使用
+            global cross_middle_line
+            cross_middle_line = Trk.middle_sideline1
+            
+            # 记录当前编码器值
+            cross_encoder = encoder_integral
+            
+        elif abs(pre_cross_encoder - encoder_integral) > PRE_CROSS_ENCODER:
+            # 编码器积分大于预设值且没有发现十字，清除预十字标志
+            pre_cross_flag = False
+            pre_cross_encoder = 0
         
     # 十字路口退出条件：
-    # 走过足够距离后清除十字路口标志
-    if cross_flag and abs(cross_encoder - encoder_integral) > CROSS_ENCODER:
+    # 走过足够距离后结束十字路口
+    if cross_flag and abs(cross_encoder - encoder_integral) > 6:
         # 退出十字路口状态
         cross_flag = False
         set_beep_off()  # 停止蜂鸣器
         
-        # 重置编码器计数（参考C代码逻辑）
+        # 重置编码器计数
         cross_encoder = 0
         
         # 重置保存的中线值
@@ -1321,14 +1334,13 @@ def element_detection():
     # 3. 避免出环岛时误判为十字路口
     # 4. 十字路口期间不检测环岛，避免误判
     
-    # 环岛检测和处理 - 只有在非十字路口状态时才进行
-    if not cross_flag:  # 十字路口期间不检测环岛
-        ring_detection()
+    # # 环岛检测和处理 - 只有在非十字路口状态时才进行
+    # if not cross_flag:  # 十字路口期间不检测环岛
+    #     ring_detection()
     
-    # # 十字路口检测 - 只有在完全无环岛状态且无环岛标志时才检测
-    # # 这样可以避免出环岛阶段的误判
-    # if (ring_state == NO_RING and not ring_left and not ring_right):
-    #     cross_detection()
+    # 十字路口检测 - 四边界检测策略
+    if (ring_state == NO_RING and not ring_left and not ring_right):
+        cross_detection()
 
 
 def clear_ring_flag():
@@ -1351,6 +1363,11 @@ def clear_ring_flag():
     cross_encoder = 0
     cross_delay_encoder = 0  # 重置延时编码器
     cross_middle_line = MIDDLE_LINE  # 重置保存的中线值
+    
+    # 清除预十字标志
+    global pre_cross_flag, pre_cross_encoder
+    pre_cross_flag = False
+    pre_cross_encoder = 0
     
     set_beep_off()  # 设置停止蜂鸣器标志
     # 恢复近端CCD1原始阈值
@@ -1390,9 +1407,9 @@ def ccd_processing(ccd_data1, ccd_data2):
     deviation1 = Trk.middle_sideline1 - center  # 近端偏差（当前位置）
     deviation2 = Trk.middle_sideline2 - center  # 远端偏差（前瞻位置）
     
-    # 只使用近端CCD控制策略
+    # 改进的CCD控制策略
     if CCD1_left_flag or CCD1_right_flag:
-        # 近端CCD有边界，使用近端CCD控制
+        # 远端边界不全或者只有近端CCD有边界，使用近端CCD控制
         deviation = deviation1
     else:
         # 近端CCD失效，保持上次偏差（添加衰减避免失控）
@@ -1548,10 +1565,7 @@ def ccd_process(timer):
         
         lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info}", 0xF800)  # 红色
         
-        # 第6行：黑白二值化状态
-        bw1_status = "hei" if black_write_1 else "bai"
-        bw2_status = "hei" if black_write_2 else "bai"
-        lcd.str12(0, 243, f"Jin1:{bw1_status} Yuan2:{bw2_status}", 0x07FF)  # 青色
+        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
