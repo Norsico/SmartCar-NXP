@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -334,7 +334,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 120  # 设置小的前进速度进行测试
+TARGET_SPEED = 100  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
