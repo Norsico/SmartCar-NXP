@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = True 
+wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = True  # False: 只巡线，True: 检测元素
@@ -54,13 +54,13 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
 THRESHOLD_MULTIPLE_1 = 38  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 38  # 远端适中
+THRESHOLD_MULTIPLE_2 = 55  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
 # - 值越小越容易判断为黑色场景
 THRESHOLD_1 = 2400      
-THRESHOLD_2 = 2090
+THRESHOLD_2 = 3000
 
 # 环岛状态定义 - 参考C代码的7阶段状态机
 NO_RING = 0            # 无环岛
@@ -309,22 +309,22 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1818 #测过了 两个都是负的 kd不是正的
+angle_kp = -1819 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -153
+angle_kd = -154
 
-roll_angle_Kp = 0.195 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.25 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.33 #0.0826 
+roll_angle_Kd = 0.32 #0.0826 
 
-speed_Kp = 0.08500002 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.084 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.002999999 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.022999999 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 10.94  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 382  # 适当减小微分系数，减少直线震荡
+line_kp = 10.58  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.002  # 减小平方项系数，避免过度响应
+line_kd = 343  # 适当减小微分系数，减少直线震荡
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -335,7 +335,7 @@ ring_line_kp = 10   # 环岛内部线路跟踪比例系数
 ring_line_kd = 400  # 环岛内部线路跟踪微分系数
 
 # 偏航角速度抑制参数
-gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 2000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
@@ -343,7 +343,7 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 58.3  # 调整平衡角度
-TARGET_SPEED = 60  # 设置小的前进速度进行测试
+TARGET_SPEED = 50  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -416,8 +416,7 @@ def update_wifi_parameters():
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            imu_data_obj.Pitch, imu_data_obj.gyro_y, TARGET_SPEED, current_speed,
-            line_deviation, line_control_output, motor1, motor2)
+            imu_data_obj.Pitch, CCD2.aver)
     
     except:
         pass
@@ -716,7 +715,7 @@ def encoder_update(timer):
     
     # 计算平均脉冲数（参考C代码逻辑）
     # encoder = (encoder_L + encoder_R) * 0.5
-    avg_encoder = (encoder_l_filtered + encoder_r_filtered) * 0.5
+    avg_encoder = (abs(encoder_l_filtered) + abs(encoder_r_filtered)) * 0.5
     
     # 积分计算距离（参考C代码：encoder_integral += encoder * 0.02）
     # 这里编码器值就是脉冲数，直接乘以时间周期进行积分
@@ -802,10 +801,10 @@ def ccd2_get(ccd_data):
         if ccd_data[i] < CCD2.min_val:
             CCD2.min_val = ccd_data[i]
     
-    # 计算中心区域平均值 (53-73)
+    # 计算中心区域平均值 (20-100)
     count = 0
     total = 0
-    for i in range(53, min(73, len(ccd_data))):
+    for i in range(20, min(100, len(ccd_data))):
         total += ccd_data[i]
         count += 1
     
@@ -1309,10 +1308,9 @@ def cross_detection():
     # 2. 远端CCD双边都丢线且不是黑色场景
     # 3. 近端CCD双边都有线
     # 4. 当前没有十字路口标志和预十字标志
-    if (ring_state == NO_RING and
-        not CCD2_left_flag and not CCD2_right_flag and not black_write_2 and
-        CCD1_left_flag and CCD1_right_flag and
-        not cross_flag and not pre_cross_flag):
+    if (ring_state == NO_RING and (not black_write_2) and
+        (CCD1_left_flag) and (CCD1_right_flag) and
+        abs(Trk.right_sideline1 - Trk.left_sideline1) < 90 and (not cross_flag) and (not pre_cross_flag)):
         # 检测到预十字
         pre_cross_flag = True
         pre_cross_encoder = encoder_integral  # 记录预十字检测时的编码器值
@@ -1322,7 +1320,7 @@ def cross_detection():
         # 检查近端CCD宽度是否大于100
         width1 = Trk.right_sideline1 - Trk.left_sideline1
         
-        if width1 > 100:
+        if abs(width1) > 100:
             # 宽度大于100，置为发现十字，开始十字路口模式
             pre_cross_flag = False  # 清除预十字标志
             cross_flag = True       # 设置十字路口标志
@@ -1342,7 +1340,7 @@ def cross_detection():
         
     # 十字路口退出条件：
     # 走过足够距离后结束十字路口
-    if cross_flag and abs(cross_encoder - encoder_integral) > 6:
+    if cross_flag and abs(cross_encoder - encoder_integral) > 8:
         # 退出十字路口状态
         cross_flag = False
         set_beep_off()  # 停止蜂鸣器
@@ -1619,7 +1617,7 @@ def ccd_process(timer):
             lcd.str12(0, 231, f"Normal Line Element:{element_status}", 0xFFFF)  # 白色
         
         # 第5行：系统信息
-        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} Dev:{line_deviation:4.1f}", 0x07FF)  # 青色
+        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} BW1:{black_write_1} BW2:{black_write_2}", 0x07FF)  # 青色
     except:
         # 显示出错也要尝试显示基本信息
         try:
