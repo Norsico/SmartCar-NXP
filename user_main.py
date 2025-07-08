@@ -331,11 +331,11 @@ original_line_kp = line_kp
 original_line_kd = line_kd
 
 # 环岛线路跟踪参数
-ring_line_kp = 10.58   # 环岛内部线路跟踪比例系数
-ring_line_kd = 343  # 环岛内部线路跟踪微分系数
+ring_line_kp = 13   # 环岛内部线路跟踪比例系数
+ring_line_kd = 370  # 环岛内部线路跟踪微分系数
 
 # 偏航角速度抑制参数
-gyro_z_kd = 2000  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
@@ -416,7 +416,7 @@ def update_wifi_parameters():
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            imu_data_obj.Pitch, CCD2.aver)
+            imu_data_obj.Pitch, CCD2.aver, imu_data_obj.acc_x,imu_data_obj.Roll,imu_data_obj.Yaw)
     
     except:
         pass
@@ -1040,16 +1040,16 @@ def middle_sideline():
     # 左环岛处理
     elif ring_left:
         if ring_state == FIND_RING or ring_state == FIND_RING_STAGE2:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 44
+            Trk.middle_sideline1 = Trk.right_sideline1 - 40
             pass  # 使用基础中线计算
         elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 40
+                Trk.middle_sideline1 = Trk.left_sideline1 + 41
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + 40
+                Trk.middle_sideline1 = Trk.left_sideline1_last +41
         elif ring_state == OUT_RING:
             Trk.middle_sideline1 = Trk.right_sideline1 - 36
     
@@ -1100,7 +1100,7 @@ def ring_detection():
     if ring_state == NO_RING:
         # 检测左环岛 - 阶段1：远端左侧丢线，近端左侧不丢线
         # 条件：远端CCD左侧丢线 + 近端CCD左侧不丢线 
-        if (CCD1_right_flag and CCD2_right_flag and not CCD2_left_flag and CCD1_left_flag and Trk.right_qulu <= 24 and CCD2.aver>2600):
+        if (CCD1_right_flag and CCD2_right_flag and not CCD2_left_flag and CCD1_left_flag and Trk.right_qulu <= 24 and CCD2.aver>2000):
             ring_state = FIND_RING
             ring_left = True
             ring_right = False
@@ -1120,7 +1120,7 @@ def ring_detection():
         # 阶段1→2：左环岛确认第二阶段
         # 条件2：近端左侧丢线，远端左侧不丢线
         
-        if ((Trk.left_sideline2 - Trk.left_sideline1)>20 and CCD2_left_flag and Trk.right_qulu <= 23):
+        if ((Trk.left_sideline2 - Trk.left_sideline1)>35 and CCD2_left_flag and Trk.right_qulu <= 23):
             # 记录第二阶段完成的编码器值
             ring_encoder = encoder_integral
             ring_state = FIND_RING_STAGE2
@@ -1160,7 +1160,7 @@ def ring_detection():
         # 阶段2→3：左环岛确认第三阶段
         # 条件3：远端左侧丢线（入环标志）
         
-        if not CCD2_left_flag and CCD1_left_flag and Trk.right_qulu <= 25:
+        if not CCD2_left_flag and CCD1_left_flag and CCD2_right_flag and CCD1_right_flag and Trk.right_qulu <= 25:
             ring_state = READY_IN_RING
             set_beep_short()  # 确认环岛：短响
             # 只降低近端CCD1阈值，提高边界检测灵敏度
@@ -1212,6 +1212,7 @@ def ring_detection():
             # 修改目标速度为环岛专用速度，并清零速度积分项避免突变
             global TARGET_SPEED
             TARGET_SPEED = ring_target_speed
+            ring_angle = imu_data_obj.Yaw  # 记录进入环岛时的角度
             ring_encoder = encoder_integral
             pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
         elif ring_right and abs(ring_encoder - encoder_integral) > 35:
@@ -1221,29 +1222,31 @@ def ring_detection():
             global TARGET_SPEED
             TARGET_SPEED = ring_target_speed
             pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
+            ring_angle = imu_data_obj.Yaw  # 记录进入环岛时的角度
             ring_encoder = encoder_integral
-        elif abs(ring_encoder - encoder_integral) > 60:   
-            ring_state = NO_RING
-            ring_left = False
-            ring_right = False
-            global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line, TARGET_SPEED
-            # 恢复近端CCD1原始阈值和线路跟踪参数
-            THRESHOLD_MULTIPLE_1 = original_threshold_1
-            line_kp = original_line_kp
-            line_kd = original_line_kd
-            pid_line.kp = line_kp
-            pid_line.kd = line_kd
-            TARGET_SPEED = original_target_speed
+        # elif abs(ring_encoder - encoder_integral) > 60:   
+        #     ring_state = NO_RING
+        #     ring_left = False
+        #     ring_right = False
+        #     global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line, TARGET_SPEED
+        #     # 恢复近端CCD1原始阈值和线路跟踪参数
+        #     THRESHOLD_MULTIPLE_1 = original_threshold_1
+        #     line_kp = original_line_kp
+        #     line_kd = original_line_kd
+        #     pid_line.kp = line_kp
+        #     pid_line.kd = line_kd
+        #     TARGET_SPEED = original_target_speed
                 
     elif ring_state == IN_RING:
         # 阶段3→4：在环岛中 -> 准备出环岛
-        # 条件：根据环岛方向检测不同的边界条件
-        if abs(ring_encoder - encoder_integral) > 34:
+        # 条件：使用角度Roll判断是否转过足够角度
+        if abs(ring_angle - imu_data_obj.Yaw) > 77:  # 可调整角度阈值
             # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             ring_state = READY_OUT_RING
-            ring_encoder = encoder_integral  # 重新记录编码器值用于出环岛阶段
+            ring_angle = imu_data_obj.Yaw  # 重新记录角度值用于出环岛阶段
+            ring_encoder = encoder_integral
 
                 
     elif ring_state == READY_OUT_RING:
@@ -1252,19 +1255,21 @@ def ring_detection():
         if ring_left:
             # 左环岛：检测到右边界表示开始出环岛
             ring_state = OUT_RING   
-            ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
+            ring_angle = imu_data_obj.Yaw  # 重新记录角度值用于最终阶段
             set_beep_long()  # 出环岛：长响一声
+            ring_encoder = encoder_integral
         elif ring_right:
             # 右环岛：检测到左边界表示开始出环岛
             ring_state = OUT_RING
-            ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
+            ring_angle = imu_data_obj.Yaw  # 重新记录角度值用于最终阶段
             set_beep_long()  # 出环岛：长响一声
+            ring_encoder = encoder_integral
 
                 
     elif ring_state == OUT_RING:
         # 阶段5→6：出环岛 -> 准备回到无环岛
         # 条件：编码器距离足够（出环岛后走了足够远）
-        if abs(ring_encoder - encoder_integral) > 15:
+        if abs(ring_encoder - encoder_integral) > 25:
             ring_state = READY_NO_RING
             # 恢复近端CCD1原始阈值
             global THRESHOLD_MULTIPLE_1
@@ -1370,9 +1375,9 @@ def element_detection():
     if not cross_flag:  # 十字路口期间不检测环岛
         ring_detection()
     
-    # # 十字路口检测 - 四边界检测策略
-    # if (ring_state == NO_RING and not ring_left and not ring_right):
-    #     cross_detection()
+    # 十字路口检测 - 四边界检测策略
+    if (ring_state == NO_RING and not ring_left and not ring_right):
+        cross_detection()
 
 
 def clear_ring_flag():
@@ -1592,9 +1597,14 @@ def ccd_process(timer):
             if ring_left: ring_dir = "L"
             elif ring_right: ring_dir = "R"
             
-            # 显示编码器距离信息
-            encoder_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
-            lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{encoder_info}", 0xF800)  # 红色
+            # 显示角度积累信息
+            if ring_state == IN_RING or ring_state == READY_OUT_RING:
+                # 在环岛中状态显示角度差值
+                angle_info = f" A:{abs(ring_angle - imu_data_obj.Yaw):.1f}"
+            else:
+                # 其他状态显示编码器距离信息
+                angle_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
+            lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{angle_info}", 0xF800)  # 红色
             
         elif cross_flag or pre_cross_flag:
             # 十字路口状态显示
