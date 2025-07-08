@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = False 
+wifi_en = True 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = True  # False: 只巡线，True: 检测元素
@@ -98,6 +98,11 @@ RING_90 = False
 encoder_integral = 0
 ring_encoder = 0        # 环岛编码器计数
 ring_angle = 0          # 环岛角度计数
+
+# 编码器低通滤波参数
+encoder_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
+encoder_l_filtered = 0.0    # 左编码器滤波后的值
+encoder_r_filtered = 0.0    # 右编码器滤波后的值
 
 # 十字路口相关全局变量
 cross_flag = False      # 十字路口标志
@@ -304,22 +309,22 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1339 #测过了 两个都是负的 kd不是正的
+angle_kp = -1247 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -248
+angle_kd = -366
 
-roll_angle_Kp = 0.514 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.345 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.8190001 #0.0826 
+roll_angle_Kd = 0.4 #0.0826 
 
 speed_Kp = 0.099 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.18 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.19 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 11.02  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 10.51  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 365  # 适当减小微分系数，减少直线震荡
+line_kd = 432  # 适当减小微分系数，减少直线震荡
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -334,10 +339,11 @@ gyro_z_kd = 5000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
+
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 59.5  # 调整平衡角度
-TARGET_SPEED = 80  # 设置小的前进速度进行测试
+med_roll_angle = 58.3  # 调整平衡角度
+TARGET_SPEED = 90  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -355,19 +361,24 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - CCD阈值参数
-wifi_data = [THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2, 0, 0, 0, 0]
+# WiFi调参数据存储 - 改为PID参数
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, line_kp, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
-    通道0: THRESHOLD_MULTIPLE_1 (近端CCD梯度检测阈值倍数)
-    通道1: THRESHOLD_MULTIPLE_2 (远端CCD梯度检测阈值倍数)
-    通道2: THRESHOLD_1 (近端CCD二值化阈值百分比)
-    通道3: THRESHOLD_2 (远端CCD二值化阈值百分比)
-    通道4-7: 保留未使用
+    通道0: angle_kp (角速度环比例系数)
+    通道1: angle_kd (角速度环微分系数)
+    通道2: roll_angle_Kp (角度环比例系数)
+    通道3: roll_angle_Kd (角度环微分系数)
+    通道4: speed_Kp (速度环比例系数)
+    通道5: line_squart_kp (线路跟踪平方项系数)
+    通道6: line_kp (线路跟踪比例系数)
+    通道7: line_kd (线路跟踪微分系数)
     """
-    global THRESHOLD_MULTIPLE_1, THRESHOLD_MULTIPLE_2, THRESHOLD_1, THRESHOLD_2
+    global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
+    global speed_Kp, line_squart_kp, line_kp, line_kd
     global wifi_data, motor1, motor2
+    global pid_angle_speed, pid_angle, pid_speed, pid_line
     
     if not wifi_enabled:
         return
@@ -381,16 +392,32 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新CCD阈值参数
-        THRESHOLD_MULTIPLE_1 = int(wifi_data[0])  # 近端CCD梯度检测阈值倍数
-        THRESHOLD_MULTIPLE_2 = int(wifi_data[1])  # 远端CCD梯度检测阈值倍数
-        THRESHOLD_1 = int(wifi_data[2])           # 近端CCD二值化阈值百分比
-        THRESHOLD_2 = int(wifi_data[3])           # 远端CCD二值化阈值百分比
+        # 更新PID参数
+        angle_kp = wifi_data[0]          # 角速度环比例系数
+        angle_kd = wifi_data[1]          # 角速度环微分系数
+        roll_angle_Kp = wifi_data[2]     # 角度环比例系数
+        roll_angle_Kd = wifi_data[3]     # 角度环微分系数
+        speed_Kp = wifi_data[4]          # 速度环比例系数
+        line_squart_kp = wifi_data[5]    # 线路跟踪平方项系数
+        line_kp = wifi_data[6]           # 线路跟踪比例系数
+        line_kd = wifi_data[7]           # 线路跟踪微分系数
         
-        # 发送示波器数据 - 显示CCD相关信息
+        # 更新PID控制器参数
+        pid_angle_speed.kp = angle_kp
+        pid_angle_speed.kd = angle_kd
+        pid_angle.kp = roll_angle_Kp
+        pid_angle.kd = roll_angle_Kd
+        pid_speed.kp = speed_Kp
+        pid_line.kp = line_kp
+        pid_line.kd = line_kd
+        pid_line.kp_squart = line_squart_kp
+        
+        # 发送示波器数据 - 显示角度和速度相关信息
+        # 计算当前速度（编码器平均值）
+        current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            CCD1.aver, CCD2.aver, CCD1.bin_thrd, CCD2.bin_thrd,
-            int(black_write_1), int(black_write_2), motor1, motor2)
+            imu_data_obj.Pitch, imu_data_obj.gyro_y, TARGET_SPEED, current_speed,
+            line_deviation, line_control_output, motor1, motor2)
     
     except:
         pass
@@ -663,7 +690,7 @@ def control_loop(timer):
     #if ticker_count % 5 == 0:
     angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
     
-    # 10ms: 速度控制
+    # 5ms: 速度控制
     if ticker_count == 5:
         avg_speed = -(kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
@@ -673,23 +700,27 @@ def control_loop(timer):
     #     pid_speed.err_sum=0;
 
 def encoder_update(timer):
-    global encoder_integral
+    global encoder_integral, encoder_l_filtered, encoder_r_filtered, encoder_filter_alpha
     
     # 获取原始编码器数据（每个周期的脉冲数）
     encoder_l_raw = encoder_l.get()
     encoder_r_raw = encoder_r.get()
     
-    # 更新卡尔曼滤波器
-    kalman_l.update(encoder_l_raw)
-    kalman_r.update(encoder_r_raw)
+    # 编码器低通滤波
+    encoder_l_filtered = encoder_filter_alpha * encoder_l_raw + (1 - encoder_filter_alpha) * encoder_l_filtered
+    encoder_r_filtered = encoder_filter_alpha * encoder_r_raw + (1 - encoder_filter_alpha) * encoder_r_filtered
+    
+    # 使用滤波后的编码器值
+    kalman_l.output = encoder_l_filtered
+    kalman_r.output = encoder_r_filtered
     
     # 计算平均脉冲数（参考C代码逻辑）
     # encoder = (encoder_L + encoder_R) * 0.5
-    avg_encoder = (abs(encoder_l_raw) + abs(encoder_r_raw)) * 0.5
+    avg_encoder = (encoder_l_filtered + encoder_r_filtered) * 0.5
     
     # 积分计算距离（参考C代码：encoder_integral += encoder * 0.02）
     # 这里编码器值就是脉冲数，直接乘以时间周期进行积分
-    distance_increment = avg_encoder * 0.01  # 10ms定时器周期
+    distance_increment = avg_encoder * 0.005  # 5ms定时器周期
     encoder_integral += distance_increment
 
 def ccd_image_init():
@@ -1037,7 +1068,7 @@ def middle_sideline():
                 # 右边界丢失时，使用上次右边界位置
                 Trk.middle_sideline1 = Trk.right_sideline1_last - 30
 
-        elif ring_state == OUT_RING:
+        elif ring_state == OUT_RING or ring_state == READY_OUT_RING:
             # 出环岛阶段：按近端CCD1左边界巡线
             if CCD1_left_flag:
                 # 有左边界时，按左边界偏移计算中线
@@ -1165,7 +1196,7 @@ def ring_detection():
             pid_line.kp = line_kp
             pid_line.kd = line_kd
             
-        elif abs(ring_encoder - encoder_integral) >= 25 or Trk.left_qulu >= 25:  # 如果走了太远还没满足条件，可能是误判
+        elif abs(ring_encoder - encoder_integral) >= 25 or Trk.left_qulu > 25:  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_right = False
             # 恢复近端CCD1原始阈值
@@ -1213,17 +1244,17 @@ def ring_detection():
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             ring_state = READY_OUT_RING
             ring_encoder = encoder_integral  # 重新记录编码器值用于出环岛阶段
-            set_beep_short()  # 准备出环岛：短响一声
+
                 
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
         # 条件：近端CCD1重新检测到边界（出环岛开始）
-        if ring_left and not black_write_2 and CCD2_left_flag and CCD2_right_flag:
+        if ring_left:
             # 左环岛：检测到右边界表示开始出环岛
             ring_state = OUT_RING   
             ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
             set_beep_long()  # 出环岛：长响一声
-        elif ring_right and Trk.left_sideline1 > 30:
+        elif ring_right:
             # 右环岛：检测到左边界表示开始出环岛
             ring_state = OUT_RING
             ring_encoder = encoder_integral  # 重新记录编码器值用于最终阶段
@@ -1336,9 +1367,9 @@ def element_detection():
     # 3. 避免出环岛时误判为十字路口
     # 4. 十字路口期间不检测环岛，避免误判
     
-    # 环岛检测和处理 - 只有在非十字路口状态时才进行
-    if not cross_flag:  # 十字路口期间不检测环岛
-        ring_detection()
+    # # 环岛检测和处理 - 只有在非十字路口状态时才进行
+    # if not cross_flag:  # 十字路口期间不检测环岛
+    #     ring_detection()
     
     # 十字路口检测 - 四边界检测策略
     if (ring_state == NO_RING and not ring_left and not ring_right):
@@ -1612,7 +1643,7 @@ pit2.callback(ccd_process)  # CCD处理回调
 imu_init()
 ccd_image_init()  # 初始化CCD图像处理
 pit1.start(1)
-pit3.start(10)
+pit3.start(5)
 pit2.start(4)  # CCD
 
 # 系统启动完成
