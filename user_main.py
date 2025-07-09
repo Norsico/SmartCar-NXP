@@ -7,7 +7,7 @@ import time
 import math
 
 # wifi开关
-wifi_en = False  
+wifi_en = True  
 
 # 元素识别开关 - 关闭后只巡线不检测元素
 element_en = False  # False: 只巡线，True: 检测元素
@@ -53,8 +53,8 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 38  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 55  # 远端适中
+THRESHOLD_MULTIPLE_1 = 26  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 36  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -342,7 +342,7 @@ gyro_z_kd = 4500  # 偏航角速度D控制系数，抑制左右摆动
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 59.95  # 调整平衡角度
+med_roll_angle = 50.9  # 调整平衡角度
 TARGET_SPEED = 65  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
@@ -362,7 +362,7 @@ line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 改为PID参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_squart_kp, line_kd]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, TARGET_SPEED, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -372,12 +372,12 @@ def update_wifi_parameters():
     通道3: roll_angle_Kd (角度环微分系数)
     通道4: speed_Kp (速度环比例系数)
     通道5: line_kp (线路跟踪比例系数)
-    通道6: line_squart_kp (线路跟踪平方项系数)
+    通道6: TARGET_SPEED (目标速度)
     通道7: line_kd (线路跟踪微分系数)
     """
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Kd, line_kp,line_squart_kp,line_kd
-    global wifi_data, motor1, motor2
+    global speed_Kp, speed_Kd, line_kp, line_kd
+    global wifi_data, motor1, motor2, TARGET_SPEED
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
     if not wifi_enabled:
@@ -399,7 +399,7 @@ def update_wifi_parameters():
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
         line_kp = wifi_data[5]           # 线路跟踪比例系数
-        line_squart_kp = wifi_data[6]    # 线路跟踪平方项系数
+        TARGET_SPEED = wifi_data[6]      # 目标速度
         line_kd = wifi_data[7]           # 线路跟踪微分系数
         
         # 更新PID控制器参数
@@ -409,7 +409,6 @@ def update_wifi_parameters():
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
         pid_line.kp = line_kp
-        pid_line.kp_squart = line_squart_kp
         pid_line.kd = line_kd
         
         # 发送示波器数据 - 显示角度和速度相关信息
