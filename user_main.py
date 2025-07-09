@@ -10,14 +10,14 @@ import math
 wifi_en = False 
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = True  # False: 只巡线，True: 检测元素
+element_en = False  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.86.9", "8086")
+        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -309,21 +309,21 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1819 #测过了 两个都是负的 kd不是正的
+angle_kp = -3092 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -154
+angle_kd = -1577.7
 
-roll_angle_Kp = 0.25 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.085 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.32 #0.0826 
+roll_angle_Kd = 0.0959 #0.0826 
 
-speed_Kp = 0.084 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.259 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.023 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 10.58  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.002  # 减小平方项系数，避免过度响应
+line_squart_kp = 0  # 减小平方项系数，避免过度响应
 line_kd = 343  # 适当减小微分系数，减少直线震荡
 
 # 保存原始线路跟踪参数
@@ -342,8 +342,8 @@ gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 58.3  # 调整平衡角度
-TARGET_SPEED = 45  # 设置小的前进速度进行测试
+med_roll_angle = 59.95  # 调整平衡角度
+TARGET_SPEED = 65  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -362,7 +362,7 @@ line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 改为PID参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, line_kp, line_kd]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_squart_kp, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -376,7 +376,7 @@ def update_wifi_parameters():
     通道7: line_kd (线路跟踪微分系数)
     """
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, line_squart_kp, line_kp, line_kd
+    global speed_Kp, speed_Kd, line_kp,line_squart_kp,line_kd
     global wifi_data, motor1, motor2
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
@@ -398,8 +398,8 @@ def update_wifi_parameters():
         roll_angle_Kp = wifi_data[2]     # 角度环比例系数
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
-        line_squart_kp = wifi_data[5]    # 线路跟踪平方项系数
-        line_kp = wifi_data[6]           # 线路跟踪比例系数
+        line_kp = wifi_data[5]    # 线路跟踪平方项系数
+        line_squart_kp = wifi_data[6]           # 线路跟踪比例系数
         line_kd = wifi_data[7]           # 线路跟踪微分系数
         
         # 更新PID控制器参数
@@ -408,9 +408,9 @@ def update_wifi_parameters():
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
-        pid_line.kp = line_kp
+        pid_line.kp = speed_Kd
+        pid_line.line_squart_kp=line_squart_kp
         pid_line.kd = line_kd
-        pid_line.kp_squart = line_squart_kp
         
         # 发送示波器数据 - 显示角度和速度相关信息
         # 计算当前速度（编码器平均值）
@@ -1682,6 +1682,7 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
+
 
 
 
