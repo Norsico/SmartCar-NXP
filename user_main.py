@@ -10,7 +10,7 @@ import math
 wifi_en = False  
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = False  # False: 只巡线，True: 检测元素
+element_en = True  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -322,9 +322,9 @@ speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清
 speed_Kd = 0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 11.757  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.0054  # 减小平方项系数，避免过度响应
-line_kd = 482  # 适当减小微分系数，减少直线震荡
+line_kp = 11.244  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.0052  # 减小平方项系数，避免过度响应
+line_kd = 450  # 适当减小微分系数，减少直线震荡
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -335,7 +335,7 @@ ring_line_kp = 13   # 环岛内部线路跟踪比例系数
 ring_line_kd = 370  # 环岛内部线路跟踪微分系数
 
 # 偏航角速度抑制参数
-gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 4500  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
@@ -343,7 +343,7 @@ gyro_z_kd = 3000  # 偏航角速度D控制系数，抑制左右摆动
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
 med_roll_angle = 59.95  # 调整平衡角度
-TARGET_SPEED = 70  # 设置小的前进速度进行测试
+TARGET_SPEED = 65  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -1682,6 +1682,7 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
+
 
 
 
