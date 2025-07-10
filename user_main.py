@@ -7,10 +7,10 @@ import time
 import math
 
 # wifi开关
-wifi_en = True  
+wifi_en = False  
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = False  # False: 只巡线，True: 检测元素
+element_en = True  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -79,20 +79,12 @@ ring_right = False
 
 # 环岛阈值调整
 original_threshold_1 = THRESHOLD_MULTIPLE_1  # 保存原始阈值
-ring_threshold_1 = 18  # 环岛内部使用的较小阈值
-
-# 环岛检测阈值 - 参考C代码调整
-RING_QULU_THRESHOLD = 22  # 环岛曲率检测阈值（参考代码使用12）
+ring_threshold_1 = 45  # 环岛内部使用的较小阈值
 
 # 环岛各阶段参数 - 需要根据实际测试调整
 READY_IN_RING_ENCODER = 32     # 进入环岛前的编码器距离（增大，因为积分值会更大）
 IN_RING_ENCODER = 10           # 环岛内部编码器距离
 NO_RING_ENCODER = 34          # 出环岛后的编码器距离
-
-# 环岛速度等级
-RING_50 = False
-RING_60 = False  
-RING_90 = False
 
 # 编码器积分值（用于距离计算）
 encoder_integral = 0
@@ -176,9 +168,6 @@ black_write_2 = False
 straight = False
 curve = False
 
-# 硬件初始化
-end_switch = Pin('D20', Pin.IN, pull=Pin.PULL_UP_47K, value=True)
-end_state = end_switch.value()
 
 # 蜂鸣器初始化
 beep = Pin('D24', Pin.OUT, pull=Pin.PULL_UP_47K, value=False)
@@ -323,7 +312,7 @@ speed_Kd = 0.022 #0.136 # 1.7 给小了虽然到达预定速度的时间会变�
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 11.99  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp =0.005  # 减小平方项系数，避免过度响应
+line_squart_kp = 0.005  # 减小平方项系数，避免过度响应
 line_kd = 352  # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 80  # 目标速度
@@ -334,13 +323,13 @@ original_line_kp = line_kp
 original_line_kd = line_kd
 
 # 环岛线路跟踪参数
-ring_line_kp = 13   # 环岛内部线路跟踪比例系数
-ring_line_kd = 370  # 环岛内部线路跟踪微分系数
+ring_line_kp = 11.99   # 环岛内部线路跟踪比例系数
+ring_line_kd = 352  # 环岛内部线路跟踪微分系数
+# 环岛目标速度
+ring_target_speed = 80  # 环岛内部目标速度
 
 # 偏航角速度抑制参数
 gyro_z_kd = 4000  # 偏航角速度D控制系数，抑制左右摆动
-
-# 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 
 # 控制变量
@@ -349,8 +338,6 @@ angle_1 = speed_1 = motor1 = motor2 = 0
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
 
-# 环岛目标速度
-ring_target_speed = 45  # 环岛内部目标速度
 ticker_count = 0
 gyro_z_control = 0  # 偏航角速度抑制控制输出
 
@@ -680,8 +667,8 @@ def control_loop(timer):
     motor1 += gyro_z_control  # 左电机增加偏航抑制
     motor2 -= gyro_z_control  # 右电机减少偏航抑制
     
-    motor1 = limit(motor1, -6666, 6666)  # 增加电机输出限制，提高响应强度
-    motor2 = limit(motor2, -6666, 6666)  # 增加电机输出限制，提高响应强度
+    motor1 = limit(motor1, -8888, 8888)  # 增加电机输出限制，提高响应强度
+    motor2 = limit(motor2, -8888, 8888)  # 增加电机输出限制，提高响应强度
     
     motor_l.duty(-motor1)
     motor_r.duty(-motor2)
@@ -731,21 +718,6 @@ def ccd_image_init():
     CCD1.bin_thrd = 0
     CCD2.bin_thrd = 0
 
-def set_ring_type(ring_type):
-    """设置环岛类型"""
-    global RING_50, RING_60, RING_90
-    # 重置所有标志
-    RING_50 = False
-    RING_60 = False
-    RING_90 = False
-    
-    # 设置对应类型
-    if ring_type == 50:
-        RING_50 = True
-    elif ring_type == 60:
-        RING_60 = True
-    elif ring_type == 90:
-        RING_90 = True
 
 def ccd1_get(ccd_data):
     """CCD1数据获取和处理 - 近端CCD"""
@@ -1036,68 +1008,61 @@ def middle_sideline():
     if not element_en:
         return
     
-    # 十字路口中线特殊处理
-    # 十字路口期间，根据边界情况选择循迹策略
-    if cross_flag:
-        # 检查远端和近端是否都有边界
-        if CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag:
-            # 远端和近端都有边界，使用平均中线来循迹
-            Trk.middle_sideline1 = (Trk.middle_sideline1 + Trk.middle_sideline2) / 2.0
-        else:
-            # 没有四边界情况，使用近端中线
-            # 这里已经在基础中线计算中完成了，不需要额外处理
-            pass
+    # # 十字路口中线特殊处理
+    # # 十字路口期间，根据边界情况选择循迹策略
+    # if cross_flag:
+    #     # 检查远端和近端是否都有边界
+    #     if CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag:
+    #         # 远端和近端都有边界，使用平均中线来循迹
+    #         Trk.middle_sideline1 = (Trk.middle_sideline1 + Trk.middle_sideline2) / 2.0
+    #     else:
+    #         # 没有四边界情况，使用近端中线
+    #         # 这里已经在基础中线计算中完成了，不需要额外处理
+    #         pass
     
     # 环岛中线特殊处理 - 参考C代码逻辑
     # 左环岛处理
-    elif ring_left:
-        if ring_state == FIND_RING or ring_state == FIND_RING_STAGE2:
+    if ring_left:
+        if ring_state == FIND_RING_STAGE2:
             Trk.middle_sideline1 = Trk.right_sideline1 - 40
             pass  # 使用基础中线计算
-        elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
+        elif ring_state == READY_IN_RING or ring_state == READY_OUT_RING:
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 41
+                Trk.middle_sideline1 = Trk.left_sideline1 + 40
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last +41
+                Trk.middle_sideline1 = Trk.left_sideline1_last + 40
         elif ring_state == OUT_RING:
             Trk.middle_sideline1 = Trk.right_sideline1 - 36
     
-    # 右环岛处理
-    elif ring_right:
-        if ring_state == FIND_RING_STAGE2:
-            # 进入环岛阶段：基于左边界偏移计算中线
-            Trk.middle_sideline1 = Trk.left_sideline1 + 44
-        elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
-            # 环岛内部阶段：按右边缘循迹
-            if CCD1_right_flag:
-                # 有右边界时，使用右边界偏移
-                Trk.middle_sideline1 = Trk.right_sideline1 - 30
-            else:
-                # 右边界丢失时，使用上次右边界位置
-                Trk.middle_sideline1 = Trk.right_sideline1_last - 30
+    # # 右环岛处理
+    # elif ring_right:
+    #     if ring_state == FIND_RING_STAGE2:
+    #         # 进入环岛阶段：基于左边界偏移计算中线
+    #         Trk.middle_sideline1 = Trk.left_sideline1 + 44
+    #     elif ring_state == READY_IN_RING or ring_state == IN_RING or ring_state == READY_OUT_RING:
+    #         # 环岛内部阶段：按右边缘循迹
+    #         if CCD1_right_flag:
+    #             # 有右边界时，使用右边界偏移
+    #             Trk.middle_sideline1 = Trk.right_sideline1 - 30
+    #         else:
+    #             # 右边界丢失时，使用上次右边界位置
+    #             Trk.middle_sideline1 = Trk.right_sideline1_last - 30
 
-        elif ring_state == OUT_RING or ring_state == READY_OUT_RING:
-            # 出环岛阶段：按近端CCD1左边界巡线
-            if CCD1_left_flag:
-                # 有左边界时，按左边界偏移计算中线
-                Trk.middle_sideline1 = Trk.left_sideline1 + 44
-            else:
-                # 左边界也丢失时，保持上次中线
-                pass
+    #     elif ring_state == OUT_RING or ring_state == READY_OUT_RING:
+    #         # 出环岛阶段：按近端CCD1左边界巡线
+    #         if CCD1_left_flag:
+    #             # 有左边界时，按左边界偏移计算中线
+    #             Trk.middle_sideline1 = Trk.left_sideline1 + 44
+    #         else:
+    #             # 左边界也丢失时，保持上次中线
+    #             pass
     
     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
     # if cross_flag:
     #     Trk.middle_sideline1 = Trk.middle_sideline2
-    
-    # 对middle_sideline1进行低通滤波，减少噪声和突变
-    global middle_line_filtered, middle_line_filter_alpha
-    middle_line_filtered = middle_line_filter_alpha * Trk.middle_sideline1 + (1 - middle_line_filter_alpha) * middle_line_filtered
-    
-    # 将滤波后的值赋回给middle_sideline1
-    Trk.middle_sideline1 = middle_line_filtered
 
 def ring_detection():
     """
@@ -1119,14 +1084,14 @@ def ring_detection():
             set_beep_short()  # 发现环岛：短响一声
             ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
             
-        # 检测右环岛 - 阶段1：远端右侧丢线，近端右侧不丢线
-        # 条件：远端CCD右侧丢线 + 近端CCD右侧不丢线
-        elif (CCD1_left_flag and CCD2_left_flag and not CCD2_right_flag and CCD1_right_flag):
-            ring_state = FIND_RING
-            ring_left = False
-            ring_right = True
-            set_beep_short()  # 发现环岛：短响一声
-            ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
+        # # 检测右环岛 - 阶段1：远端右侧丢线，近端右侧不丢线
+        # # 条件：远端CCD右侧丢线 + 近端CCD右侧不丢线
+        # elif (CCD1_left_flag and CCD2_left_flag and not CCD2_right_flag and CCD1_right_flag):
+        #     ring_state = FIND_RING
+        #     ring_left = False
+        #     ring_right = True
+        #     set_beep_short()  # 发现环岛：短响一声
+        #     ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
             
     elif ring_state == FIND_RING and ring_left:
         # 阶段1→2：左环岛确认第二阶段
@@ -1145,28 +1110,28 @@ def ring_detection():
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
-    elif ring_state == FIND_RING and ring_right:
-        # 阶段1→2：右环岛确认第二阶段
-        # 条件2：近端右侧丢线，远端右侧不丢线
+    # elif ring_state == FIND_RING and ring_right:
+    #     # 阶段1→2：右环岛确认第二阶段
+    #     # 条件2：近端右侧丢线，远端右侧不丢线
 
-        if (not CCD1_right_flag and CCD2_right_flag and Trk.left_qulu <= 22):
-            # 记录第二阶段完成的编码器值
-            ring_encoder = encoder_integral
-            ring_state = FIND_RING_STAGE2
-            set_beep_short()  # 第二阶段完成：短响一声
+    #     if (not CCD1_right_flag and CCD2_right_flag and Trk.left_qulu <= 22):
+    #         # 记录第二阶段完成的编码器值
+    #         ring_encoder = encoder_integral
+    #         ring_state = FIND_RING_STAGE2
+    #         set_beep_short()  # 第二阶段完成：短响一声
             
-        elif abs(ring_encoder - encoder_integral) >= 10 or Trk.left_qulu > 25:  # 如果走了太远还没满足条件，可能是误判
-            ring_state = NO_RING
-            ring_right = False
-            # 恢复近端CCD原始阈值
-            global THRESHOLD_MULTIPLE_1
-            THRESHOLD_MULTIPLE_1 = original_threshold_1
-        elif (not CCD2_right_flag and CCD1_right_flag and Trk.left_qulu <= 22):
-            ring_state = FIND_RING
-            ring_left = False
-            ring_right = True
-            set_beep_short()  # 发现环岛：短响一声
-            ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
+    #     elif abs(ring_encoder - encoder_integral) >= 10 or Trk.left_qulu > 25:  # 如果走了太远还没满足条件，可能是误判
+    #         ring_state = NO_RING
+    #         ring_right = False
+    #         # 恢复近端CCD原始阈值
+    #         global THRESHOLD_MULTIPLE_1
+    #         THRESHOLD_MULTIPLE_1 = original_threshold_1
+    #     elif (not CCD2_right_flag and CCD1_right_flag and Trk.left_qulu <= 22):
+    #         ring_state = FIND_RING
+    #         ring_left = False
+    #         ring_right = True
+    #         set_beep_short()  # 发现环岛：短响一声
+    #         ring_encoder = encoder_integral  # 记录发现环岛时的编码器值
             
     elif ring_state == FIND_RING_STAGE2 and ring_left:
         # 阶段2→3：左环岛确认第三阶段
@@ -1191,29 +1156,29 @@ def ring_detection():
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = original_threshold_1
             
-    elif ring_state == FIND_RING_STAGE2 and ring_right:
-        # 阶段2→3：右环岛确认第三阶段
-        # 条件3：远端右侧丢线（入环标志）
+    # elif ring_state == FIND_RING_STAGE2 and ring_right:
+    #     # 阶段2→3：右环岛确认第三阶段
+    #     # 条件3：远端右侧丢线（入环标志）
         
-        if not CCD2_right_flag and CCD1_right_flag and Trk.left_qulu <= 25:
-            ring_state = READY_IN_RING
-            set_beep_short()  # 确认环岛：短响
-            # 只降低近端CCD1阈值，提高边界检测灵敏度
-            global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line
-            THRESHOLD_MULTIPLE_1 = ring_threshold_1
-            # 修改线路跟踪参数为环岛专用参数
-            ring_encoder = encoder_integral
-            line_kp = ring_line_kp
-            line_kd = ring_line_kd
-            pid_line.kp = line_kp
-            pid_line.kd = line_kd
+    #     if not CCD2_right_flag and CCD1_right_flag and Trk.left_qulu <= 25:
+    #         ring_state = READY_IN_RING
+    #         set_beep_short()  # 确认环岛：短响
+    #         # 只降低近端CCD1阈值，提高边界检测灵敏度
+    #         global THRESHOLD_MULTIPLE_1, line_kp, line_kd, pid_line
+    #         THRESHOLD_MULTIPLE_1 = ring_threshold_1
+    #         # 修改线路跟踪参数为环岛专用参数
+    #         ring_encoder = encoder_integral
+    #         line_kp = ring_line_kp
+    #         line_kd = ring_line_kd
+    #         pid_line.kp = line_kp
+    #         pid_line.kd = line_kd
             
-        elif abs(ring_encoder - encoder_integral) >= 25 or Trk.left_qulu > 25:  # 如果走了太远还没满足条件，可能是误判
-            ring_state = NO_RING
-            ring_right = False
-            # 恢复近端CCD1原始阈值
-            global THRESHOLD_MULTIPLE_1
-            THRESHOLD_MULTIPLE_1 = original_threshold_1
+    #     elif abs(ring_encoder - encoder_integral) >= 25 or Trk.left_qulu > 25:  # 如果走了太远还没满足条件，可能是误判
+    #         ring_state = NO_RING
+    #         ring_right = False
+    #         # 恢复近端CCD1原始阈值
+    #         global THRESHOLD_MULTIPLE_1
+    #         THRESHOLD_MULTIPLE_1 = original_threshold_1
             
     elif ring_state == READY_IN_RING:
         # 阶段2→3：准备进入环岛 -> 在环岛中
@@ -1370,67 +1335,16 @@ def cross_detection():
         global cross_middle_line
         cross_middle_line = MIDDLE_LINE
 
-
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
     # 检查元素识别开关
     if not element_en:
         return  # 元素识别关闭，直接返回
     
-    # 元素检测优先级：参考C代码的element()函数逻辑
-    # 1. 优先处理环岛（环岛状态不为NO_RING时）
-    # 2. 只有在完全无环岛状态时才检测十字路口
-    # 3. 避免出环岛时误判为十字路口
-    # 4. 十字路口期间不检测环岛，避免误判
-    
     # 环岛检测和处理 - 只有在非十字路口状态时才进行
-#     if not cross_flag:  # 十字路口期间不检测环岛
-#         ring_detection()
+    if not cross_flag:  # 十字路口期间不检测环岛
+        ring_detection()
     
-    # 十字路口检测 - 四边界检测策略
-    if (ring_state == NO_RING and not ring_left and not ring_right):
-        cross_detection()
-
-
-def clear_ring_flag():
-    """清除环岛和十字路口标志位"""
-    global ring_state, ring_left, ring_right, ring_encoder
-    global cross_flag, cross_encoder, cross_delay_encoder, cross_middle_line
-    global beep_double_count, THRESHOLD_MULTIPLE_1, original_threshold_1
-    global line_kp, line_kd, pid_line, original_line_kp, original_line_kd
-    global TARGET_SPEED, original_target_speed
-    
-    # 清除环岛标志
-    ring_state = NO_RING
-    ring_left = False
-    ring_right = False
-    ring_encoder = 0
-    beep_double_count = 0
-    
-    # 清除十字路口标志
-    cross_flag = False
-    cross_encoder = 0
-    cross_delay_encoder = 0  # 重置延时编码器
-    cross_middle_line = MIDDLE_LINE  # 重置保存的中线值
-    
-    # 清除预十字标志
-    global pre_cross_flag, pre_cross_encoder
-    pre_cross_flag = False
-    pre_cross_encoder = 0
-    
-    set_beep_off()  # 设置停止蜂鸣器标志
-    # 恢复近端CCD1原始阈值
-    THRESHOLD_MULTIPLE_1 = original_threshold_1
-    # 恢复线路跟踪参数
-    line_kp = original_line_kp
-    line_kd = original_line_kd
-    pid_line.kp = line_kp
-    pid_line.kd = line_kd
-    # 恢复目标速度
-    TARGET_SPEED = original_target_speed
-    pid_speed.err_sum = 0  # 清零积分项，避免速度切换时的冲击
-    # 注意：不清零encoder_integral，保持全局距离累积
-
 def ccd_processing(ccd_data1, ccd_data2):
     """CCD主处理函数 - 移植自C语言示例，优化巡线控制"""
     # 1. CCD数据获取和预处理
@@ -1466,7 +1380,7 @@ def ccd_processing(ccd_data1, ccd_data2):
         deviation = line_deviation * 0.95  # 逐渐衰减，避免持续偏移
     
     # 偏差限制 - 参考舵机控制的限制策略
-    deviation = max(-50, min(50, deviation))
+    deviation = max(-70, min(70, deviation))
     
     return deviation
 
@@ -1482,29 +1396,6 @@ def ccd_process(timer):
     # 初始化CCD数据变量
     ccd_data_upper = None
     ccd_data_lower = None
-    
-    # 按键处理 - 放在CCD回调中
-    try:
-        key_data = key.get()
-        
-        # 检查key2短按 (按键2对应索引1) - 清除环岛标志位
-        if key_data[1] == 1:  # 短按
-            clear_ring_flag()  # 清除环岛标志位
-            key.clear(2)  # 清除按键状态
-            
-        # 检查key1短按 (按键1对应索引0) - 切换元素识别开关
-        if key_data[0] == 1:  # 短按
-            global element_en
-            element_en = not element_en  # 切换开关状态
-            if element_en:
-                set_beep_short()  # 开启元素识别：短响
-            else:
-                set_beep_double_short()  # 关闭元素识别：双短响
-                # 关闭元素识别时清除所有元素标志
-                clear_ring_flag()
-            key.clear(1)  # 清除按键状态
-    except:
-        pass  # 按键处理出错不影响主要功能
     
     # CCD数据处理
     try:
@@ -1684,21 +1575,23 @@ while True:
     # WiFi调参更新
     update_wifi_parameters()
     
-    if end_switch.value() != end_state:
+    # 安全保护：非WiFi模式下，电机满转时停止
+    if not wifi_enabled and (motor1 == -8888 or motor2 == -8888):
+        
+        # 停止所有定时器
         pit1.stop()
         pit3.stop()
-        pit2.stop()  # 停止CCD定时器
-        break
-    
-    # 主循环延时，控制蜂鸣器更新频率约50Hz
-    time.sleep_ms(20)
+        pit2.stop()
+        
+        # 长响警告
+        set_beep_long()
+        beep_process()
+
+        while True:
+            # 立即停止电机
+            motor_l.duty(0)
+            motor_r.duty(0)
+        
+        break  # 退出主循环
     
     gc.collect()
-
-
-
-
-
-
-
-
