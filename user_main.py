@@ -53,8 +53,8 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 26  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 36  # 远端适中
+THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 41  # 远端适中
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -309,25 +309,25 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp =-3217 #测过了 两个都是负的 kd不是正的
+angle_kp = -2922.6 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd =-80.49997
+angle_kd = -634.7
 
-roll_angle_Kp = 0.074 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.1 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd =0.0386 #0.0826 
+roll_angle_Kd = 0.026 #0.0826 
 
-speed_Kp =0.27 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.08000001#0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kp = 0.105 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Ki = 0 # 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
+speed_Kd = 0.022 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp =10.67  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp =0.0052  # 减小平方项系数，避免过度响应
-line_kd =360  # 适当减小微分系数，减少直线震荡
+line_kp = 11.99  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp =0.005  # 减小平方项系数，避免过度响应
+line_kd = 352  # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 80  # 目标速度
-med_roll_angle = 60  # 调整平衡角度
+med_roll_angle = 60.4  # 调整平衡角度
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -363,7 +363,7 @@ line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 改为PID参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, TARGET_SPEED, line_kd]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, line_kp, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -372,8 +372,8 @@ def update_wifi_parameters():
     通道2: roll_angle_Kp (角度环比例系数)
     通道3: roll_angle_Kd (角度环微分系数)
     通道4: speed_Kp (速度环比例系数)
-    通道5: line_kp (线路跟踪比例系数)
-    通道6: TARGET_SPEED (目标速度)
+    通道5: speed_Kd (速度环微分系数)
+    通道6: line_kp (线路跟踪比例系数)
     通道7: line_kd (线路跟踪微分系数)
     """
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
@@ -393,14 +393,14 @@ def update_wifi_parameters():
             if data_flag[i]:
                 wifi_data[i] = wifi.get_data(i)
         
-        # 更新PID参数
+        # 更新参数
         angle_kp = wifi_data[0]          # 角速度环比例系数
         angle_kd = wifi_data[1]          # 角速度环微分系数
         roll_angle_Kp = wifi_data[2]     # 角度环比例系数
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
-        speed_Kd = wifi_data[5]           # 线路跟踪比例系数
-        TARGET_SPEED = wifi_data[6]      # 目标速度
+        speed_Kd = wifi_data[5]          # 速度环微分系数
+        line_kp = wifi_data[6]           # 线路跟踪比例系数
         line_kd = wifi_data[7]           # 线路跟踪微分系数
         
         # 更新PID控制器参数
@@ -410,13 +410,14 @@ def update_wifi_parameters():
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
         pid_speed.kd = speed_Kd
+        pid_line.kp = line_kp
         pid_line.kd = line_kd
         
         # 发送示波器数据 - 显示角度和速度相关信息
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            imu_data_obj.Pitch, CCD2.aver, imu_data_obj.acc_x,imu_data_obj.Roll,imu_data_obj.Yaw)
+            current_speed, imu_data_obj.Pitch, CCD2.aver, imu_data_obj.acc_x,imu_data_obj.Roll,imu_data_obj.Yaw)
     
     except:
         pass
@@ -993,8 +994,16 @@ def middle_sideline():
     global Trk, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     global ring_state, ring_left, ring_right, cross_flag
     
+    # CCD2中线计算
+    if CCD2_left_flag and CCD2_right_flag:
+        # 双边都有效，正常计算
+        Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+    else:
+        # 丢线时保持上次中线值
+        pass  # Trk.middle_sideline2保持不变
+
     # 基础中线计算
-    # CCD1中线计算 - 主要巡线传感器，考虑丢线情况
+    # CCD1中线计算
     if CCD1_left_flag and CCD1_right_flag:
         # 双边都有效，正常计算
         Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
@@ -1005,16 +1014,19 @@ def middle_sideline():
         # 右边有效，左边丢线，使用上次左边界值计算中线
         Trk.middle_sideline1 = (Trk.left_sideline1_last + Trk.right_sideline1) / 2.0
     else:
-        # 双边都丢线，保持上次中线值
-        pass  # Trk.middle_sideline1保持不变
-    
-    # CCD2中线计算 - 主要用于元素检测，简单计算即可
-    if CCD2_left_flag and CCD2_right_flag:
-        # 双边都有效，正常计算
-        Trk.middle_sideline2 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
-    else:
-        # 丢线时保持上次中线值，因为CCD2主要用于元素检测而非巡线
-        pass  # Trk.middle_sideline2保持不变
+        # 近端CCD双边都丢线，检查远端CCD是否有边界
+        if CCD2_left_flag and CCD2_right_flag:
+            # 远端CCD双边都有效，使用远端中线
+            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+        elif CCD2_left_flag and not CCD2_right_flag:
+            # 远端CCD左边有效，右边丢线
+            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2_last) / 2.0
+        elif not CCD2_left_flag and CCD2_right_flag:
+            # 远端CCD右边有效，左边丢线
+            Trk.middle_sideline1 = (Trk.left_sideline2_last + Trk.right_sideline2) / 2.0
+        else:
+            # 远端CCD也双边丢线，保持上次中线值
+            pass  # Trk.middle_sideline1保持不变
     
     # 宽度计算
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
@@ -1682,6 +1694,7 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
+
 
 
 
