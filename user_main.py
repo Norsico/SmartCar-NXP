@@ -309,22 +309,25 @@ lcd.mode(0)
 lcd.clear(0x0000)
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -3320 #测过了 两个都是负的 kd不是正的
+angle_kp =-3217 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -1491.2
+angle_kd =-80.49997
 
-roll_angle_Kp = 0.06099998 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.074 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0386 #0.0826 
+roll_angle_Kd =0.0386 #0.0826 
 
-speed_Kp = 0.29 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp =0.27 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0# 适当增加积分项，提高速度控制精度，避免定期清零造成的速度波动
-speed_Kd = 0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.08000001#0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 10.67  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.0052  # 减小平方项系数，避免过度响应
-line_kd = 360  # 适当减小微分系数，减少直线震荡
+line_kp =10.67  # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp =0.0052  # 减小平方项系数，避免过度响应
+line_kd =360  # 适当减小微分系数，减少直线震荡
+
+TARGET_SPEED = 80  # 目标速度
+med_roll_angle = 60  # 调整平衡角度
 
 # 保存原始线路跟踪参数
 original_line_kp = line_kp
@@ -335,15 +338,13 @@ ring_line_kp = 13   # 环岛内部线路跟踪比例系数
 ring_line_kd = 370  # 环岛内部线路跟踪微分系数
 
 # 偏航角速度抑制参数
-gyro_z_kd = 4500  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 4000  # 偏航角速度D控制系数，抑制左右摆动
 
 # 前瞻控制参数已删除 - 只使用近端CCD巡线
 
 
 # 控制变量
 angle_1 = speed_1 = motor1 = motor2 = 0
-med_roll_angle = 50.9  # 调整平衡角度
-TARGET_SPEED = 65  # 设置小的前进速度进行测试
 
 # 保存原始目标速度
 original_target_speed = TARGET_SPEED
@@ -362,7 +363,7 @@ line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
 # WiFi调参数据存储 - 改为PID参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, TARGET_SPEED, line_kd]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, TARGET_SPEED, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -398,7 +399,7 @@ def update_wifi_parameters():
         roll_angle_Kp = wifi_data[2]     # 角度环比例系数
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
-        line_kp = wifi_data[5]           # 线路跟踪比例系数
+        speed_Kd = wifi_data[5]           # 线路跟踪比例系数
         TARGET_SPEED = wifi_data[6]      # 目标速度
         line_kd = wifi_data[7]           # 线路跟踪微分系数
         
@@ -408,7 +409,7 @@ def update_wifi_parameters():
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
-        pid_line.kp = line_kp
+        pid_speed.kd = speed_Kd
         pid_line.kd = line_kd
         
         # 发送示波器数据 - 显示角度和速度相关信息
@@ -1681,6 +1682,7 @@ while True:
     time.sleep_ms(20)
     
     gc.collect()
+
 
 
 
