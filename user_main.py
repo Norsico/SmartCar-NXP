@@ -17,7 +17,7 @@ MIDDLE_LINE = 64
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.86.9", "8086")
+        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -57,24 +57,24 @@ THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 41  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -971 #测过了 两个都是负的 kd不是正的
+angle_kp = -1982.2 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -67
+angle_kd = -89.7
 
-roll_angle_Kp = 0.27 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.11 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.079 #0.0826 
+roll_angle_Kd = 0.0011 #0.0826 
 
-speed_Kp = 0.185 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.306 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
 speed_Kd = 0.007 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 14.4 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.003  # 减小平方项系数，避免过度响应
-line_kd = 375  # 适当减小微分系数，减少直线震荡
+line_kp = 23.99 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.0202  # 减小平方项系数，避免过度响应
+line_kd = 2376  # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 65  # 目标速度
+TARGET_SPEED = 82  # 目标速度
 med_roll_angle = 56.5  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
@@ -346,8 +346,8 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - 恢复为角度环微分项
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, line_kp, line_kd]
+# WiFi调参数据存储 - 将speed_Kd替换为line_squart_kp
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, line_kp, line_kd]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -356,12 +356,12 @@ def update_wifi_parameters():
     通道2: roll_angle_Kp (角度环比例系数)
     通道3: roll_angle_Kd (角度环微分系数)
     通道4: speed_Kp (速度环比例系数)
-    通道5: speed_Kd (速度环微分系数)
+    通道5: line_squart_kp (线路跟踪平方项系数)
     通道6: line_kp (线路跟踪比例系数)
     通道7: line_kd (线路跟踪微分系数)
     """
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, speed_Kd, line_kp, line_kd
+    global speed_Kp, line_squart_kp, line_kp, line_kd
     global wifi_data, motor1, motor2, TARGET_SPEED
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
@@ -383,7 +383,7 @@ def update_wifi_parameters():
         roll_angle_Kp = wifi_data[2]     # 角度环比例系数
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
-        speed_Kd = wifi_data[5]          # 速度环微分系数
+        line_squart_kp = wifi_data[5]    # 线路跟踪平方项系数
         line_kp = wifi_data[6]           # 线路跟踪比例系数
         line_kd = wifi_data[7]           # 线路跟踪微分系数
         
@@ -393,9 +393,9 @@ def update_wifi_parameters():
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
-        pid_speed.kd = speed_Kd
         pid_line.kp = line_kp
         pid_line.kd = line_kd
+        pid_line.kp_squart = line_squart_kp
         
         # 发送示波器数据 - 显示角度和速度相关信息
         # 计算当前速度（编码器平均值）
@@ -669,11 +669,11 @@ def control_loop(timer):
     motor_r.duty(-motor2)
     
     # 5ms: 角度控制
-    #if ticker_count % 5 == 0:
-    angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
+    if ticker_count % 2 == 0:
+        angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
     
-    # 5ms: 速度控制
-    if ticker_count == 5:
+    # 10ms: 速度控制
+    if ticker_count % 5 == 0:
         avg_speed = -(kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
         speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
@@ -973,7 +973,7 @@ def middle_sideline():
     # CCD1中线计算
     if CCD1_left_flag and CCD1_right_flag:
         # 双边都有效，正常计算
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 + 8
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 
     elif CCD1_left_flag and not CCD1_right_flag:
         # 左边有效，右边丢线，使用上次右边界值计算中线
         Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
