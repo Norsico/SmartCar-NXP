@@ -7,17 +7,17 @@ import time
 import math
 
 # wifi开关
-wifi_en = True  
+wifi_en = True   
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = True  # False: 只巡线，True: 检测元素
+element_en = False  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.86.9", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         time.sleep_ms(500)
         wifi_enabled = True
@@ -57,26 +57,25 @@ THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 41  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -2750 #测过了 两个都是负的 kd不是正的
+angle_kp = -971 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -75
+angle_kd = -67
 
-roll_angle_Kp = 0.209 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.27 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0408 #0.0826 
+roll_angle_Kd = 0.079 #0.0826 
 
-speed_Kp = 0.104 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
-speed_Ki = 0 # 适当增加积分项，提高速度控制精度，避免
-
-speed_Kd = 0.022 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kp = 0.185 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
+speed_Kd = 0.007 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 18.15# 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 14.4 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0.003  # 减小平方项系数，避免过度响应
-line_kd = 264  # 适当减小微分系数，减少直线震荡
+line_kd = 375  # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 80  # 目标速度
-med_roll_angle = 60.2  # 调整平衡角度
+TARGET_SPEED = 65  # 目标速度
+med_roll_angle = 56.5  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -347,7 +346,7 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - 改为PID参数
+# WiFi调参数据存储 - 恢复为角度环微分项
 wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, speed_Kd, line_kp, line_kd]
 
 def update_wifi_parameters():
@@ -402,7 +401,7 @@ def update_wifi_parameters():
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            current_speed, imu_data_obj.Pitch, CCD2.aver, imu_data_obj.acc_x,imu_data_obj.Roll,imu_data_obj.Yaw)
+            current_speed, pid_speed.err_sum, TARGET_SPEED, imu_data_obj.Pitch)
     
     except:
         pass
@@ -639,12 +638,10 @@ def imu_init():
     
     for i in range(3):
         Filter_data[i] /= 1000
-count_time=0
+
 def control_loop(timer):
-    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, count_time, gyro_z_control
-    
+    global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, gyro_z_control
     ticker_flag = True
-    count_time = (count_time+1)%2000
     ticker_count = (ticker_count + 1) % 10
 
     # 1ms: 角速度控制
@@ -679,10 +676,7 @@ def control_loop(timer):
     if ticker_count == 5:
         avg_speed = -(kalman_l.output + kalman_r.output) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
-        speed_1 = limit(speed_1, -30, 30)  # 限制角度偏移
-    # 移除定期清零速度积分项，避免速度控制不稳定
-    # if count_time == 0:
-    #     pid_speed.err_sum=0;
+        speed_1 = limit(speed_1, -10, 10)  # 限制角度偏移
 
 def encoder_update(timer):
     global encoder_integral, encoder_l_filtered, encoder_r_filtered, encoder_filter_alpha
@@ -1401,19 +1395,17 @@ def ccd_processing(ccd_data1, ccd_data2):
     deviation = max(-70, min(70, deviation))
     
     return deviation
-
+# 全局CCD数据变量 - 用于主循环显示
+ccd_data_upper = None
+ccd_data_lower = None
 
 def ccd_process(timer):
-    """CCD数据处理函数，独立定时器运行 - 使用新的算法"""
+    """CCD数据处理函数，独立定时器运行 - 只处理CCD算法，不包含显示"""
     global ccd_ticker_flag, ccd_ticker_count, line_deviation, line_control_output
-    global key
+    global key, ccd_data_upper, ccd_data_lower
     
     ccd_ticker_flag = True
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
-    
-    # 初始化CCD数据变量
-    ccd_data_upper = None
-    ccd_data_lower = None
     
     # CCD数据处理
     try:
@@ -1451,112 +1443,6 @@ def ccd_process(timer):
     except Exception as e:
         # 发生错误时逐渐减小控制输出，避免突然停止
         line_control_output *= 0.9
-    
-    # 显示屏更新 - 独立于CCD数据处理，确保始终更新
-    try:
-        # 显示远端CCD (CCD0) 在屏幕上半部分
-        if ccd_data_upper:
-            lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
-        
-        # 显示近端CCD (CCD1) 在屏幕下半部分
-        if ccd_data_lower:
-            lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
-            
-        # 显示边界线和中线 - 基于原始边界检测算法结果
-        # ===== 远端CCD (上半部分) 的边界线和中线 =====
-        # 画远端CCD左边界线 (红色) - 只有未丢线才显示
-        if CCD2_left_flag and 0 <= Trk.left_sideline2 <= 127:
-            lcd.line(Trk.left_sideline2, 0, Trk.left_sideline2, 24, color=0xF800, thick=2)
-        
-        # 画远端CCD右边界线 (红色) - 只有未丢线才显示
-        if CCD2_right_flag and 0 <= Trk.right_sideline2 <= 127:
-            lcd.line(Trk.right_sideline2, 0, Trk.right_sideline2, 24, color=0xF800, thick=2)
-        
-        # 画远端CCD中线 (绿色) - 始终显示
-        if 0 <= int(Trk.middle_sideline2) <= 127:
-            lcd.line(int(Trk.middle_sideline2), 0, int(Trk.middle_sideline2), 24, color=0x07E0, thick=2)
-        
-        # ===== 近端CCD (下半部分) 的边界线和中线 =====
-        # 画近端CCD左边界线 (红色) - 只有未丢线才显示
-        if CCD1_left_flag and 0 <= Trk.left_sideline1 <= 127:
-            lcd.line(Trk.left_sideline1, 96, Trk.left_sideline1, 120, color=0xF800, thick=2)
-        
-        # 画近端CCD右边界线 (红色) - 只有未丢线才显示
-        if CCD1_right_flag and 0 <= Trk.right_sideline1 <= 127:
-            lcd.line(Trk.right_sideline1, 96, Trk.right_sideline1, 120, color=0xF800, thick=2)
-        
-        # 画近端CCD中线 (绿色) - 始终显示
-        if 0 <= int(Trk.middle_sideline1) <= 127:
-            lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
-        
-                # 第1行：近端边界位置
-        lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
-        
-        # 第2行：远端边界位置和偏差
-        lcd.str12(0, 207, f"L2:{Trk.left_sideline2:3d} R2:{Trk.right_sideline2:3d} M2:{Trk.middle_sideline2:4.1f}", 0xFFFF)
-        
-        # 第3行：两侧曲率和赛道宽度 (重点显示)
-        # 计算宽度时使用原始边界检测结果
-        left_width1 = abs(Trk.middle_sideline1 - Trk.left_sideline1) if CCD1_left_flag else 0
-        right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
-        lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
-        
-        # 第4行：元素状态显示 - 根据当前元素类型显示相应参数
-        if ring_state != NO_RING or ring_left or ring_right:
-            # 环岛状态显示
-            ring_status = ""
-            if ring_state == NO_RING: ring_status = "NoRing"
-            elif ring_state == FIND_RING: ring_status = "FOUND"
-            elif ring_state == FIND_RING_STAGE2: ring_status = "FOUND2"
-            elif ring_state == READY_IN_RING: ring_status = "READY"
-            elif ring_state == IN_RING: ring_status = "IN_RING"
-            elif ring_state == READY_OUT_RING: ring_status = "READY_OUT"
-            elif ring_state == OUT_RING: ring_status = "OUT_RING"
-            elif ring_state == READY_NO_RING: ring_status = "READY_NO"
-            
-            ring_dir = ""
-            if ring_left: ring_dir = "L"
-            elif ring_right: ring_dir = "R"
-            
-            # 显示角度积累信息
-            if ring_state == IN_RING or ring_state == READY_OUT_RING:
-                # 在环岛中状态显示角度差值
-                angle_info = f" A:{abs(ring_angle - imu_data_obj.Yaw):.1f}"
-            else:
-                # 其他状态显示编码器距离信息
-                angle_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
-            lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{angle_info}", 0xF800)  # 红色
-            
-        elif cross_flag or pre_cross_flag:
-            # 十字路口状态显示
-            cross_status = ""
-            cross_encoder_info = ""
-            
-            if pre_cross_flag:
-                cross_status = "PRE_CROSS"
-                cross_encoder_info = f" E:{abs(pre_cross_encoder - encoder_integral):.0f}"
-            elif cross_flag:
-                cross_status = "CROSS"
-                cross_encoder_info = f" E:{abs(cross_encoder - encoder_integral):.0f}"
-                
-            # 显示四边界状态
-            four_boundary = "4B" if (CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag) else "NO"
-            lcd.str12(0, 231, f"{cross_status} {four_boundary}{cross_encoder_info}", 0x07E0)  # 绿色
-            
-        else:
-            # 正常巡线状态
-            element_status = "ON" if element_en else "OFF"
-            lcd.str12(0, 231, f"Normal Line Element:{element_status}", 0xFFFF)  # 白色
-        
-        # 第5行：系统信息
-        lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} aver2:{CCD2.aver}", 0x07FF)  # 青色
-    except:
-        # 显示出错也要尝试显示基本信息
-        try:
-            lcd.str12(0, 279, f"Ring:ERROR Key2:Clear", 0xF800)
-            lcd.str12(0, 291, f"System:Display Error", 0xF800)
-        except:
-            pass
 
 # 初始化定时器
 pit1 = ticker(1)
@@ -1579,6 +1465,9 @@ pit2.start(4)  # CCD
 # 系统启动完成
 print("init")
 
+# 显示更新计数器 - 控制显示更新频率
+display_counter = 0
+
 # 主循环
 while True:
     if ticker_flag:
@@ -1594,6 +1483,115 @@ while True:
     update_wifi_parameters()
     
     current_speed = -(kalman_l.output + kalman_r.output) / 2
+    
+    # 显示屏更新 - 降低更新频率，避免影响主循环性能
+    display_counter = (display_counter + 1) % 2  # 每2次循环更新一次显示
+    if display_counter == 0:
+        try:
+            # 显示远端CCD (CCD0) 在屏幕上半部分
+            if ccd_data_upper:
+                lcd.wave(0, 0, 128, 96, ccd_data_upper, max=4095)
+            
+            # 显示近端CCD (CCD1) 在屏幕下半部分
+            if ccd_data_lower:
+                lcd.wave(0, 96, 128, 96, ccd_data_lower, max=4095)
+                
+            # 显示边界线和中线 - 基于原始边界检测算法结果
+            # ===== 远端CCD (上半部分) 的边界线和中线 =====
+            # 画远端CCD左边界线 (红色) - 只有未丢线才显示
+            if CCD2_left_flag and 0 <= Trk.left_sideline2 <= 127:
+                lcd.line(Trk.left_sideline2, 0, Trk.left_sideline2, 24, color=0xF800, thick=2)
+            
+            # 画远端CCD右边界线 (红色) - 只有未丢线才显示
+            if CCD2_right_flag and 0 <= Trk.right_sideline2 <= 127:
+                lcd.line(Trk.right_sideline2, 0, Trk.right_sideline2, 24, color=0xF800, thick=2)
+            
+            # 画远端CCD中线 (绿色) - 始终显示
+            if 0 <= int(Trk.middle_sideline2) <= 127:
+                lcd.line(int(Trk.middle_sideline2), 0, int(Trk.middle_sideline2), 24, color=0x07E0, thick=2)
+            
+            # ===== 近端CCD (下半部分) 的边界线和中线 =====
+            # 画近端CCD左边界线 (红色) - 只有未丢线才显示
+            if CCD1_left_flag and 0 <= Trk.left_sideline1 <= 127:
+                lcd.line(Trk.left_sideline1, 96, Trk.left_sideline1, 120, color=0xF800, thick=2)
+            
+            # 画近端CCD右边界线 (红色) - 只有未丢线才显示
+            if CCD1_right_flag and 0 <= Trk.right_sideline1 <= 127:
+                lcd.line(Trk.right_sideline1, 96, Trk.right_sideline1, 120, color=0xF800, thick=2)
+            
+            # 画近端CCD中线 (绿色) - 始终显示
+            if 0 <= int(Trk.middle_sideline1) <= 127:
+                lcd.line(int(Trk.middle_sideline1), 96, int(Trk.middle_sideline1), 120, color=0x07E0, thick=2)
+            
+                    # 第1行：近端边界位置
+            lcd.str12(0, 195, f"L1:{Trk.left_sideline1:3d} R1:{Trk.right_sideline1:3d} M1:{Trk.middle_sideline1:4.1f}", 0xFFFF)
+            
+            # 第2行：远端边界位置和偏差
+            lcd.str12(0, 207, f"L2:{Trk.left_sideline2:3d} R2:{Trk.right_sideline2:3d} M2:{Trk.middle_sideline2:4.1f}", 0xFFFF)
+            
+            # 第3行：两侧曲率和赛道宽度 (重点显示)
+            # 计算宽度时使用原始边界检测结果
+            left_width1 = abs(Trk.middle_sideline1 - Trk.left_sideline1) if CCD1_left_flag else 0
+            right_width1 = abs(Trk.right_sideline1 - Trk.middle_sideline1) if CCD1_right_flag else 0
+            lcd.str12(0, 219, f"QL:{Trk.left_qulu:4.1f} QR:{Trk.right_qulu:4.1f} W:{left_width1:.0f}/{right_width1:.0f}", 0x07FF)
+            
+            # 第4行：元素状态显示 - 根据当前元素类型显示相应参数
+            if ring_state != NO_RING or ring_left or ring_right:
+                # 环岛状态显示
+                ring_status = ""
+                if ring_state == NO_RING: ring_status = "NoRing"
+                elif ring_state == FIND_RING: ring_status = "FOUND"
+                elif ring_state == FIND_RING_STAGE2: ring_status = "FOUND2"
+                elif ring_state == READY_IN_RING: ring_status = "READY"
+                elif ring_state == IN_RING: ring_status = "IN_RING"
+                elif ring_state == READY_OUT_RING: ring_status = "READY_OUT"
+                elif ring_state == OUT_RING: ring_status = "OUT_RING"
+                elif ring_state == READY_NO_RING: ring_status = "READY_NO"
+                
+                ring_dir = ""
+                if ring_left: ring_dir = "L"
+                elif ring_right: ring_dir = "R"
+                
+                # 显示角度积累信息
+                if ring_state == IN_RING or ring_state == READY_OUT_RING:
+                    # 在环岛中状态显示角度差值
+                    angle_info = f" A:{abs(ring_angle - imu_data_obj.Yaw):.1f}"
+                else:
+                    # 其他状态显示编码器距离信息
+                    angle_info = f" E:{abs(ring_encoder - encoder_integral):.0f}"
+                lcd.str12(0, 231, f"Ring:{ring_status}{ring_dir}{angle_info}", 0xF800)  # 红色
+                
+            elif cross_flag or pre_cross_flag:
+                # 十字路口状态显示
+                cross_status = ""
+                cross_encoder_info = ""
+                
+                if pre_cross_flag:
+                    cross_status = "PRE_CROSS"
+                    cross_encoder_info = f" E:{abs(pre_cross_encoder - encoder_integral):.0f}"
+                elif cross_flag:
+                    cross_status = "CROSS"
+                    cross_encoder_info = f" E:{abs(cross_encoder - encoder_integral):.0f}"
+                    
+                # 显示四边界状态
+                four_boundary = "4B" if (CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag) else "NO"
+                lcd.str12(0, 231, f"{cross_status} {four_boundary}{cross_encoder_info}", 0x07E0)  # 绿色
+                
+            else:
+                # 正常巡线状态
+                element_status = "ON" if element_en else "OFF"
+                lcd.str12(0, 231, f"Normal Line Element:{element_status}", 0xFFFF)  # 白色
+            
+            # 第5行：系统信息
+            lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} count:", 0x07FF)  # 青色
+        except:
+            # 显示出错也要尝试显示基本信息
+            try:
+                lcd.str12(0, 279, f"Display:ERROR", 0xF800)
+                lcd.str12(0, 291, f"System:Running", 0xF800)
+            except:
+                pass
+
     # 安全保护：非WiFi模式下，电机满转时停止
     if not wifi_enabled and (current_speed > 260 or current_speed < -260):
         
