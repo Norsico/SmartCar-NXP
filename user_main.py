@@ -57,25 +57,25 @@ THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 41  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1982.2 #测过了 两个都是负的 kd不是正的
+angle_kp = -1700 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -89.7
+angle_kd = -96
 
-roll_angle_Kp = 0.11 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.1145 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0011 #0.0826 
+roll_angle_Kd = 0 #0.0826 
 
-speed_Kp = 0.306 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.34 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
-speed_Kd = 0.007 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 23.99 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 22 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0.0202  # 减小平方项系数，避免过度响应
-line_kd = 2376  # 适当减小微分系数，减少直线震荡
+line_kd = 2000 # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 82  # 目标速度
-med_roll_angle = 56.5  # 调整平衡角度
+TARGET_SPEED = 65  # 目标速度
+med_roll_angle = 57.1  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -326,7 +326,7 @@ ring_line_kd = 352  # 环岛内部线路跟踪微分系数
 ring_target_speed = 80  # 环岛内部目标速度
 
 # 偏航角速度抑制参数
-gyro_z_kd = 4000  # 偏航角速度D控制系数，抑制左右摆动
+gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
 
 
 # 控制变量
@@ -346,8 +346,12 @@ middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
 line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
 line_output_filtered = 0.0  # 滤波后的控制输出值
 
-# WiFi调参数据存储 - 将speed_Kd替换为line_squart_kp
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, line_kp, line_kd]
+# 角速度控制输出低通滤波参数
+motor1_filter_alpha = 0.5  # 角速度控制输出滤波系数，0-1之间，越小滤波越强
+motor1_filtered = 0.0  # 滤波后的角速度控制输出值
+
+# WiFi调参数据存储 - 将line_kp和line_kd替换为TARGET_SPEED和med_roll_angle
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_squart_kp, TARGET_SPEED, med_roll_angle]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -357,12 +361,12 @@ def update_wifi_parameters():
     通道3: roll_angle_Kd (角度环微分系数)
     通道4: speed_Kp (速度环比例系数)
     通道5: line_squart_kp (线路跟踪平方项系数)
-    通道6: line_kp (线路跟踪比例系数)
-    通道7: line_kd (线路跟踪微分系数)
+    通道6: TARGET_SPEED (目标速度)
+    通道7: med_roll_angle (平衡角度)
     """
     global angle_kp, angle_kd, roll_angle_Kp, roll_angle_Kd
-    global speed_Kp, line_squart_kp, line_kp, line_kd
-    global wifi_data, motor1, motor2, TARGET_SPEED
+    global speed_Kp, line_squart_kp, TARGET_SPEED, med_roll_angle
+    global wifi_data, motor1, motor2
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
     if not wifi_enabled:
@@ -384,8 +388,8 @@ def update_wifi_parameters():
         roll_angle_Kd = wifi_data[3]     # 角度环微分系数
         speed_Kp = wifi_data[4]          # 速度环比例系数
         line_squart_kp = wifi_data[5]    # 线路跟踪平方项系数
-        line_kp = wifi_data[6]           # 线路跟踪比例系数
-        line_kd = wifi_data[7]           # 线路跟踪微分系数
+        TARGET_SPEED = wifi_data[6]      # 目标速度
+        med_roll_angle = wifi_data[7]    # 平衡角度
         
         # 更新PID控制器参数
         pid_angle_speed.kp = angle_kp
@@ -393,8 +397,6 @@ def update_wifi_parameters():
         pid_angle.kp = roll_angle_Kp
         pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
-        pid_line.kp = line_kp
-        pid_line.kd = line_kd
         pid_line.kp_squart = line_squart_kp
         
         # 发送示波器数据 - 显示角度和速度相关信息
@@ -641,6 +643,7 @@ def imu_init():
 
 def control_loop(timer):
     global ticker_flag, ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, gyro_z_control
+    global motor1_filtered, motor1_filter_alpha
     ticker_flag = True
     ticker_count = (ticker_count + 1) % 10
 
@@ -648,7 +651,12 @@ def control_loop(timer):
     imu_data = imu.get()
     imu_process()
     
-    motor1 = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
+    # 角速度控制输出
+    motor1_raw = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
+    
+    # 对角速度控制输出进行低通滤波
+    motor1_filtered = motor1_filter_alpha * motor1_raw + (1 - motor1_filter_alpha) * motor1_filtered
+    motor1 = motor1_filtered
 
     # 偏航角速度抑制控制
     gyro_z_control = gyro_z_controller.update(imu_data_obj.gyro_z)
