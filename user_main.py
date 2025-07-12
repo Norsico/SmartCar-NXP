@@ -41,6 +41,8 @@ ccd_ticker_count = 0
 line_deviation = 0  # 线路偏差
 line_control_output = 0  # 线路控制输出
 
+cross_middle_line = 0
+
 # 按键相关变量
 key = KEY_HANDLER(10)  # 按键扫描周期为10
 
@@ -1021,9 +1023,11 @@ def middle_sideline():
     #         # 这里已经在基础中线计算中完成了，不需要额外处理
     #         pass
     #     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
-
+    
+    global cross_middle_line
     if cross_flag:
-        Trk.middle_sideline1 = Trk.middle_sideline2
+        if CCD2_left_flag and CCD2_left_flag:
+            Trk.middle_sideline1 = Trk.middle_sideline2
 
     # 环岛中线特殊处理 - 参考C代码逻辑
     # 左环岛处理
@@ -1298,10 +1302,10 @@ def ring_detection():
 def cross_detection():
     """十字路口检测 - 移植参考代码的检测策略"""
     global cross_flag, cross_encoder, encoder_integral
-    global pre_cross_flag
+    global pre_cross_flag, cross_middle_line
     global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     global ring_state, ring_left, ring_right
-    global cross_delay_encoder, black_write_2
+    global cross_delay_encoder, black_write_2, TARGET_SPEED, original_target_speed
     
     if ((not cross_flag) and (not pre_cross_flag)):
         if((not black_write_2) and abs(Trk.right_sideline2 - Trk.left_sideline2) > abs(Trk.right_sideline1 - Trk.left_sideline1)):
@@ -1315,13 +1319,21 @@ def cross_detection():
              pre_cross_flag = False
              cross_flag = True
              set_beep_short()
+             cross_middle_line = Trk.middle_sideline1
+             # 十字路口提速到75
+            #  TARGET_SPEED = 75
+             
         elif (abs(cross_encoder-encoder_integral)>=20 or black_write_2):
             pre_cross_flag = False
             cross_flag = False
+            # 恢复原速度
+            # TARGET_SPEED = original_target_speed
     elif (cross_flag and (not pre_cross_flag)):
         if (abs(cross_encoder-encoder_integral)>=15):
             pre_cross_flag = False
             cross_flag = False
+            # 恢复原速度
+            # TARGET_SPEED = original_target_speed
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
@@ -1545,7 +1557,7 @@ while True:
                 
                 if pre_cross_flag:
                     cross_status = "PRE_CROSS"
-                    cross_encoder_info = f" E:{abs(pre_cross_encoder - encoder_integral):.0f}"
+                    cross_encoder_info = f" E:{abs(cross_encoder - encoder_integral):.0f}"
                 elif cross_flag:
                     cross_status = "CROSS"
                     cross_encoder_info = f" E:{abs(cross_encoder - encoder_integral):.0f}"
@@ -1560,7 +1572,7 @@ while True:
                 lcd.str12(0, 231, f"Normal Line Element:{element_status}", 0xFFFF)  # 白色
             
             # 第5行：系统信息
-            lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} count:", 0x07FF)  # 青色
+            lcd.str12(0, 243, f"Pitch:{imu_data_obj.Pitch:4.1f} mid:{cross_middle_line}:", 0x07FF)  # 青色
         except:
             # 显示出错也要尝试显示基本信息
             try:
