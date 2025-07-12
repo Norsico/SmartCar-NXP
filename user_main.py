@@ -7,10 +7,10 @@ import time
 import math
 
 # wifi开关
-wifi_en = True   
+wifi_en = False   
 
 # 元素识别开关 - 关闭后只巡线不检测元素
-element_en = False  # False: 只巡线，True: 检测元素
+element_en = True  # False: 只巡线，True: 检测元素
 
 MIDDLE_LINE = 64
 
@@ -72,7 +72,7 @@ speed_Kd = 0 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但
 # 线路跟踪PD控制器参数 - 参考C代码优化
 line_kp = 22 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0.0202  # 减小平方项系数，避免过度响应
-line_kd = 2000 # 适当减小微分系数，减少直线震荡
+line_kd = 2200 # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 65  # 目标速度
 med_roll_angle = 57.1  # 调整平衡角度
@@ -323,7 +323,7 @@ original_line_kd = line_kd
 ring_line_kp = 11.99   # 环岛内部线路跟踪比例系数
 ring_line_kd = 352  # 环岛内部线路跟踪微分系数
 # 环岛目标速度
-ring_target_speed = 80  # 环岛内部目标速度
+ring_target_speed = 60  # 环岛内部目标速度
 
 # 偏航角速度抑制参数
 gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
@@ -1027,9 +1027,9 @@ def middle_sideline():
     # 左环岛处理
     if ring_left:
         if ring_state == FIND_RING_STAGE2:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 26
+            Trk.middle_sideline1 = Trk.right_sideline1 - 22
         elif ring_state == FIND_RING:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 20
+            Trk.middle_sideline1 = Trk.right_sideline1 - 22
         elif ring_state == READY_IN_RING or ring_state == IN_RING :
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
@@ -1041,12 +1041,12 @@ def middle_sideline():
         elif ring_state == READY_OUT_RING:
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 20
+                Trk.middle_sideline1 = Trk.left_sideline1 + 5
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + 23
+                Trk.middle_sideline1 = Trk.left_sideline1_last + 10
         elif ring_state == OUT_RING:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 26
+            Trk.middle_sideline1 = Trk.right_sideline1 - 22
     
     # # 右环岛处理
     # elif ring_right:
@@ -1118,7 +1118,7 @@ def ring_detection():
             ring_state = FIND_RING_STAGE2
             set_beep_short()  # 第二阶段完成：短响一声
             
-        elif abs(ring_encoder - encoder_integral) >= 10 or Trk.right_qulu >= 18:  # 如果走了太远还没满足条件，可能是误判
+        elif abs(ring_encoder - encoder_integral) >= 20 or Trk.right_qulu >= 18:  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_left = False
             # # 恢复近端CCD原始阈值
@@ -1152,7 +1152,6 @@ def ring_detection():
         # 阶段2→3：左环岛确认第三阶段
         # 条件3：远端左侧丢线（入环标志）
         if ((not CCD2_left_flag) and CCD1_left_flag and CCD2_right_flag and CCD1_right_flag 
-            and Trk.right_qulu <= 15 
             and Trk.middle_sideline2<70):
             ring_angle = imu_data_obj.Yaw  # 记录进入环岛时的角度
             ring_encoder = encoder_integral
@@ -1167,7 +1166,7 @@ def ring_detection():
             # pid_line.kp = line_kp
             # pid_line.kd = line_kd
             
-        elif abs(ring_encoder - encoder_integral) >= 10 or Trk.right_qulu >= 20:  # 如果走了太远还没满足条件，可能是误判
+        elif abs(ring_encoder - encoder_integral) >= 20 or Trk.right_qulu >= 25:  # 如果走了太远还没满足条件，可能是误判
             ring_state = NO_RING
             ring_left = False
             # # 恢复近端CCD原始阈值
@@ -1234,7 +1233,7 @@ def ring_detection():
     elif ring_state == IN_RING and ring_left:
         # 阶段3→4：在环岛中 -> 准备出环岛
         # 条件：使用角度Roll判断是否转过足够角度
-        if ((Trk.right_sideline2-Trk.left_sideline2)>60 and (Trk.right_sideline1-Trk.left_sideline1)>60):  # 可调整角度阈值
+        if ((Trk.right_sideline2-Trk.left_sideline2)>90 and (Trk.right_sideline1-Trk.left_sideline1)>105):  # 可调整角度阈值
             ring_encoder = encoder_integral
             # 恢复近端CCD1原始阈值
             # global THRESHOLD_MULTIPLE_1
