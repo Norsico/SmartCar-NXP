@@ -60,11 +60,11 @@ THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1970 #测过了 两个都是负的 kd不是正的
+angle_kp = -1440 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -388
 
-roll_angle_Kp = 0.1145 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.1339 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
 roll_angle_Kd = 0 #0.0826 
 
@@ -73,9 +73,9 @@ speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控�
 speed_Kd = 0.11 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 20.9 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.02  # 减小平方项系数，避免过度响应
-line_kd = 2357 # 适当减小微分系数，减少直线震荡
+line_kp = 21 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0  # 减小平方项系数，避免过度响应
+line_kd = 2337 # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 65  # 目标速度   
 med_roll_angle = 57.1  # 调整平衡角度
@@ -357,7 +357,7 @@ motor1_filter_alpha = 0.5  # 角速度控制输出滤波系数，0-1之间，越
 motor1_filtered = 0.0  # 滤波后的角速度控制输出值
 
 # WiFi调参数据存储 - 新的8通道参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, speed_Kp, line_kp, line_kd, speed_Kd, med_roll_angle]
+wifi_data = [angle_kp, angle_kd, roll_angle_Kp, speed_Kp, line_kp, line_kd, speed_Kd, TARGET_SPEED]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
@@ -368,10 +368,10 @@ def update_wifi_parameters():
     通道4: line_kp (线路跟踪比例系数)
     通道5: line_kd (线路跟踪微分系数)
     通道6: speed_Kd (速度环微分系数)
-    通道7: med_roll_angle (平衡角度)
+    通道7: TARGET_SPEED (目标速度)
     """
     global angle_kp, angle_kd, roll_angle_Kp, speed_Kp
-    global line_kp, line_kd, speed_Kd, med_roll_angle
+    global line_kp, line_kd, speed_Kd, TARGET_SPEED
     global wifi_data, motor1, motor2
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
@@ -395,7 +395,7 @@ def update_wifi_parameters():
         line_kp = wifi_data[4]           # 线路跟踪比例系数
         line_kd = wifi_data[5]           # 线路跟踪微分系数
         speed_Kd = wifi_data[6]          # 速度环微分系数
-        med_roll_angle = wifi_data[7]    # 平衡角度
+        TARGET_SPEED = wifi_data[7]      # 目标速度
         
         # 更新PID控制器参数
         pid_angle_speed.kp = angle_kp
