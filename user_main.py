@@ -7,8 +7,8 @@ import time
 import math
 
 # 开关  # False，True
-wifi_en = True   
-element_en = False
+wifi_en = False   
+element_en = True
 
 MIDDLE_LINE = 64
 
@@ -60,24 +60,24 @@ THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1440 #测过了 两个都是负的 kd不是正的
+angle_kp = -1560 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -388
+angle_kd = -222
 
-roll_angle_Kp = 0.1339 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.1326 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
 roll_angle_Kd = 0 #0.0826 
 
-speed_Kp = 0.1649 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.2326 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
-speed_Kd = 0.11 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.21 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 21 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 20.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 2337 # 适当减小微分系数，减少直线震荡
+line_kd = 2300 # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 65  # 目标速度   
+TARGET_SPEED = 70  # 目标速度   
 med_roll_angle = 57.1  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
@@ -410,7 +410,7 @@ def update_wifi_parameters():
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            current_speed, pid_speed.err_sum, TARGET_SPEED, imu_data_obj.Pitch)
+            imu_data_obj.Pitch, current_speed, pid_speed.err_sum, TARGET_SPEED, imu_data_obj.Pitch)
     
     except:
         pass
@@ -990,7 +990,7 @@ def middle_sideline():
     # CCD1中线计算
     if CCD1_left_flag and CCD1_right_flag:
         # 双边都有效，正常计算
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 + 8
         effective_middleline1 = Trk.middle_sideline1
     elif CCD1_left_flag and not CCD1_right_flag:
         # 左边有效，右边丢线，使用上次右边界值计算中线
@@ -1036,10 +1036,11 @@ def middle_sideline():
 
     if cross_flag:
         if CCD2_left_flag and CCD2_left_flag:   
-            Trk.middle_sideline1 = Trk.middle_sideline2
+            Trk.middle_sideline1 = Trk.middle_sideline2+10
         else:
             Trk.middle_sideline1 = (effective_middleline1 + effective_middleline2) / 2
-    # 环岛中线特殊处理 - 参考C代码逻辑
+
+
     # 左环岛处理
     if ring_left:
         if ring_state == FIND_RING_STAGE2:
@@ -1324,27 +1325,29 @@ def cross_detection():
     
     if ((not cross_flag) and (not pre_cross_flag)):
         if((not black_write_2) and abs(Trk.right_sideline2 - Trk.left_sideline2) > abs(Trk.right_sideline1 - Trk.left_sideline1)
-           and (not CCD2_left_flag) and (not CCD2_right_flag)):
+           and (not CCD2_left_flag) and (not CCD2_right_flag) and CCD1_left_flag and CCD1_right_flag 
+           and Trk.right_sideline1-Trk.left_sideline1<100):
             cross_encoder = encoder_integral  # 记录预十字检测时的编码器值
             pre_cross_flag = True
             cross_flag = False
         # 检查近端CCD宽度是否大于100
     elif ((not cross_flag) and pre_cross_flag):
-        if ((not black_write_2) and abs(Trk.right_sideline1 - Trk.left_sideline1)>100 and abs(cross_encoder-encoder_integral)<20
-            and (not CCD2_left_flag) and (not CCD2_right_flag)):
-             pre_cross_flag = False
-             cross_flag = True
-             set_beep_short()
+        if ((not black_write_2) and abs(cross_encoder-encoder_integral)<15
+            and (abs(Trk.right_sideline1 - Trk.left_sideline1)>110 or ((not CCD1_left_flag) and (not CCD1_right_flag)))):
+            cross_encoder = encoder_integral  # 记录预十字检测时的编码器值 
+            pre_cross_flag = False
+            cross_flag = True
+            set_beep_short()
              # 十字路口提速到75
             #  TARGET_SPEED = 75
              
-        elif (abs(cross_encoder-encoder_integral)>=20 or black_write_2):
+        elif (abs(cross_encoder-encoder_integral)>=15 or black_write_2):
             pre_cross_flag = False
             cross_flag = False
             # 恢复原速度
             # TARGET_SPEED = original_target_speed
     elif (cross_flag and (not pre_cross_flag)):
-        if (CCD1_left_flag and CCD1_right_flag):
+        if ((CCD1_left_flag and CCD1_right_flag) or abs(cross_encoder-encoder_integral)>=15):
             pre_cross_flag = False
             cross_flag = False
             # 恢复原速度
@@ -1409,8 +1412,8 @@ def element_detection():
     if not element_en:
         return  # 元素识别关闭，直接返回  
     
-    if not cross_flag:  # 十字路口期间不检测环岛
-        ring_detection()
+    # if not cross_flag:  # 十字路口期间不检测环岛
+    #     ring_detection()
 
     if ring_state == NO_RING:
         cross_detection()
