@@ -56,11 +56,11 @@ CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 # 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
 # - 值越小越灵敏，容易检测到边界但可能误判
 # - 值越大越保守，不易误判但可能漏检
-THRESHOLD_MULTIPLE_1 = 45  # 近端更灵敏
+THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1560 #测过了 两个都是负的 kd不是正的
+angle_kp = -1666 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -222
 
@@ -73,11 +73,11 @@ speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控�
 speed_Kd = 0.21 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 20.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0  # 减小平方项系数，避免过度响应
-line_kd = 2300 # 适当减小微分系数，减少直线震荡
+line_kp = 19 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.02  # 减小平方项系数，避免过度响应
+line_kd = 1500 # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 70  # 目标速度   
+TARGET_SPEED = 68  # 目标速度   
 med_roll_angle = 57.1  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
@@ -680,8 +680,12 @@ def control_loop(timer):
     motor1 = limit(motor1, -8888, 8888)  # 增加电机输出限制，提高响应强度
     motor2 = limit(motor2, -8888, 8888)  # 增加电机输出限制，提高响应强度
     
-    motor_l.duty(-motor1)
-    motor_r.duty(-motor2)
+    if cross_flag:
+        motor_l.duty(-motor1)
+        motor_r.duty(-motor2)
+    else:
+        motor_l.duty(-motor1)
+        motor_r.duty(-motor2)
     
     # 5ms: 角度控制
     if ticker_count % 2 == 0:
@@ -990,28 +994,27 @@ def middle_sideline():
     # CCD1中线计算
     if CCD1_left_flag and CCD1_right_flag:
         # 双边都有效，正常计算
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 + 8
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 + 3
         effective_middleline1 = Trk.middle_sideline1
     elif CCD1_left_flag and not CCD1_right_flag:
         # 左边有效，右边丢线，使用上次右边界值计算中线
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1_last) / 2.0 + 3
     elif not CCD1_left_flag and CCD1_right_flag:
         # 右边有效，左边丢线，使用上次左边界值计算中线
-        Trk.middle_sideline1 = (Trk.left_sideline1_last +Trk.right_sideline1) / 2.0
+        Trk.middle_sideline1 = (Trk.left_sideline1_last +Trk.right_sideline1) / 2.0 + 3 
     else:
-        # 近端CCD双边都丢线，检查远端CCD是否有边界
-        if CCD2_left_flag and CCD2_right_flag:
-            # 远端CCD双边都有效，使用远端中线
-            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
-        elif CCD2_left_flag and not CCD2_right_flag:
-            # 远端CCD左边有效，右边丢线
-            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2_last) / 2.0
-        elif not CCD2_left_flag and CCD2_right_flag:
-            # 远端CCD右边有效，左边丢线
-            Trk.middle_sideline1 = (Trk.left_sideline2_last + Trk.right_sideline2) / 2.0
-        else:
-            # 远端CCD也双边丢线，保持上次中线值
-            pass  # Trk.middle_sideline1保持不变
+    #     # 近端CCD双边都丢线，检查远端CCD是否有边界
+    #     if CCD2_left_flag and CCD2_right_flag:
+    #         # 远端CCD双边都有效，使用远端中线
+        Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0 #     elif CCD2_left_flag and not CCD2_right_flag:
+    #         # 远端CCD左边有效，右边丢线
+    #         Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2_last) / 2.0
+    #     elif not CCD2_left_flag and CCD2_right_flag:
+    #         # 远端CCD右边有效，左边丢线
+    #         Trk.middle_sideline1 = (Trk.left_sideline2_last + Trk.right_sideline2) / 2.0
+    #     else:
+    #         # 远端CCD也双边丢线，保持上次中线值
+    #         pass  # Trk.middle_sideline1保持不变
     
     # 宽度计算
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
@@ -1035,39 +1038,39 @@ def middle_sideline():
     #     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
 
     if cross_flag:
-        if CCD2_left_flag and CCD2_left_flag:   
-            Trk.middle_sideline1 = Trk.middle_sideline2+10
+        if CCD2_left_flag and CCD2_right_flag and abs(Trk.left_sideline2 - Trk.right_sideline2)<40:   
+            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
         else:
-            Trk.middle_sideline1 = (effective_middleline1 + effective_middleline2) / 2
+            pass
 
 
-    # 左环岛处理
-    if ring_left:
-        if ring_state == FIND_RING_STAGE2:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 22
-        elif ring_state == FIND_RING:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 22
-        elif ring_state == READY_IN_RING or ring_state == IN_RING :
-            # 环岛内部阶段：按左边缘循迹
-            if CCD1_left_flag:
-                # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 38
-            else:
-                # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + 32
-        elif ring_state == READY_OUT_RING:
-            if CCD1_left_flag:
-                # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 25
-            else:
-                # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.left_sideline1_last + 25
-        elif ring_state == OUT_RING:
-            Trk.middle_sideline1 = Trk.right_sideline1 - 24
+    # # 左环岛处理
+    # if ring_left:
+    #     if ring_state == FIND_RING_STAGE2:
+    #         Trk.middle_sideline1 = Trk.right_sideline1 - 22
+    #     elif ring_state == FIND_RING:
+    #         Trk.middle_sideline1 = Trk.right_sideline1 - 22
+    #     elif ring_state == READY_IN_RING or ring_state == IN_RING :
+    #         # 环岛内部阶段：按左边缘循迹
+    #         if CCD1_left_flag:
+    #             # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
+    #             Trk.middle_sideline1 = Trk.left_sideline1 + 38
+    #         else:
+    #             # 左边界丢失时，使用上次左边界位置
+    #             Trk.middle_sideline1 = Trk.left_sideline1_last + 32
+    #     elif ring_state == READY_OUT_RING:
+    #         if CCD1_left_flag:
+    #             # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
+    #             Trk.middle_sideline1 = Trk.left_sideline1 + 25
+    #         else:
+    #             # 左边界丢失时，使用上次左边界位置
+    #             Trk.middle_sideline1 = Trk.left_sideline1_last + 25
+    #     elif ring_state == OUT_RING:
+    #         Trk.middle_sideline1 = Trk.right_sideline1 - 24
 
-    if flash_flag:
-        if left_flash_flag or left_flash_flag:
-            Trk.middle_sideline1 = Trk.right_sideline1-10
+    # if flash_flag:
+    #     if left_flash_flag or left_flash_flag:
+    #         Trk.middle_sideline1 = Trk.right_sideline1-10
 
     
     # # 右环岛处理
@@ -1324,16 +1327,15 @@ def cross_detection():
     global cross_delay_encoder, black_write_2, TARGET_SPEED, original_target_speed
     
     if ((not cross_flag) and (not pre_cross_flag)):
-        if((not black_write_2) and abs(Trk.right_sideline2 - Trk.left_sideline2) > abs(Trk.right_sideline1 - Trk.left_sideline1)
-           and (not CCD2_left_flag) and (not CCD2_right_flag) and CCD1_left_flag and CCD1_right_flag 
-           and Trk.right_sideline1-Trk.left_sideline1<100):
+        if((not black_write_2) and (not CCD2_left_flag) and (not CCD2_right_flag) 
+           and (Trk.right_sideline1-Trk.left_sideline1)<(Trk.right_sideline2-Trk.left_sideline2)):
             cross_encoder = encoder_integral  # 记录预十字检测时的编码器值
             pre_cross_flag = True
             cross_flag = False
         # 检查近端CCD宽度是否大于100
     elif ((not cross_flag) and pre_cross_flag):
-        if ((not black_write_2) and abs(cross_encoder-encoder_integral)<15
-            and (abs(Trk.right_sideline1 - Trk.left_sideline1)>110 or ((not CCD1_left_flag) and (not CCD1_right_flag)))):
+        if (abs(cross_encoder-encoder_integral)<15
+            and (not CCD1_left_flag) and (not CCD1_right_flag)):
             cross_encoder = encoder_integral  # 记录预十字检测时的编码器值 
             pre_cross_flag = False
             cross_flag = True
@@ -1415,8 +1417,8 @@ def element_detection():
     # if not cross_flag:  # 十字路口期间不检测环岛
     #     ring_detection()
 
-    if ring_state == NO_RING:
-        cross_detection()
+    # if ring_state == NO_RING:
+    #     cross_detection()
 
     # if not cross_flag and ring_state == NO_RING:
     #     flash_detection()
@@ -1447,19 +1449,19 @@ def ccd_processing(ccd_data1, ccd_data2):
     deviation1 = Trk.middle_sideline1 - center  # 近端偏差（当前位置）
     deviation2 = Trk.middle_sideline2 - center  # 远端偏差（前瞻位置）
     
-    # 改进的CCD控制策略
-    if CCD1_left_flag or CCD1_right_flag:
-        # 远端边界不全或者只有近端CCD有边界，使用近端CCD控制
-        deviation = deviation1
-    else:
-        # 近端CCD失效，保持上次偏差（添加衰减避免失控）
-        global line_deviation
-        deviation = line_deviation * 0.95  # 逐渐衰减，避免持续偏移
+    # # 改进的CCD控制策略
+    # if CCD1_left_flag or CCD1_right_flag:
+    #     # 远端边界不全或者只有近端CCD有边界，使用近端CCD控制
+    #     deviation = deviation1
+    # else:
+    #     # 近端CCD失效，保持上次偏差（添加衰减避免失控）
+    #     global line_deviation
+    #     deviation = line_deviation  # 逐渐衰减，避免持续偏移
     
-    # 偏差限制 - 参考舵机控制的限制策略
-    deviation = max(-70, min(70, deviation))
+    # # 偏差限制 - 参考舵机控制的限制策略
+    # deviation = max(-100, min(100, deviation))
     
-    return deviation
+    return deviation1
 # 全局CCD数据变量 - 用于主循环显示
 ccd_data_upper = None
 ccd_data_lower = None
@@ -1669,7 +1671,7 @@ while True:
             lcd.str12(0, 255, f"BW2:{black_write_2}, CCD2aver:{CCD2.aver}", 0xFFFF)  # 黄色
             
             # 第6行：系统信息
-            lcd.str12(0, 267, f"Pitch:{imu_data_obj.Pitch:4.1f}", 0x07FF)  # 青色
+            lcd.str12(0, 267, f"Pitch:{imu_data_obj.Pitch:4.1f} M1:{-motor1:4.0f} M2:{-motor2:4.0f}    ", 0x07FF)  # 青色
         except:
             # 显示出错也要尝试显示基本信息
             try:
