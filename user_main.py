@@ -6,9 +6,11 @@ import gc
 import time
 import math
 
-# 开关  # False，True
-wifi_en = False   
+# 开关  #False #True
+wifi_en = True   
 element_en = True
+
+cross_count=0
 
 MIDDLE_LINE = 64
 
@@ -60,25 +62,25 @@ THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
 # PID参数 - 进一步增强响应强度
-angle_kp = -1666 #测过了 两个都是负的 kd不是正的
+angle_kp = -3325 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
-angle_kd = -222
+angle_kd = -450
 
-roll_angle_Kp = 0.1326 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.0838 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0 #0.0826 
+roll_angle_Kd = 0.1012 #0.0826 
 
-speed_Kp = 0.2326 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.4 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
-speed_Kd = 0.21 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.7 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 19 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.02  # 减小平方项系数，避免过度响应
-line_kd = 1500 # 适当减小微分系数，减少直线震荡
+line_kp = 25.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.64  # 减小平方项系数，避免过度响应
+line_kd = 2575 # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 68  # 目标速度   
-med_roll_angle = 57.1  # 调整平衡角度
+TARGET_SPEED = 81  # 目标速度   
+med_roll_angle = 64.3  # 调整平衡角度
 
 # 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
 # - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
@@ -357,21 +359,21 @@ motor1_filter_alpha = 0.5  # 角速度控制输出滤波系数，0-1之间，越
 motor1_filtered = 0.0  # 滤波后的角速度控制输出值
 
 # WiFi调参数据存储 - 新的8通道参数
-wifi_data = [angle_kp, angle_kd, roll_angle_Kp, speed_Kp, line_kp, line_kd, speed_Kd, TARGET_SPEED]
+wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
 
 def update_wifi_parameters():
     """更新WiFi调参数据
     通道0: angle_kp (角速度环比例系数)
-    通道1: angle_kd (角速度环微分系数)
+    通道1: speed_Kd (速度环微分系数)
     通道2: roll_angle_Kp (角度环比例系数)
-    通道3: speed_Kp (速度环比例系数)
-    通道4: line_kp (线路跟踪比例系数)
-    通道5: line_kd (线路跟踪微分系数)
-    通道6: speed_Kd (速度环微分系数)
-    通道7: TARGET_SPEED (目标速度)
+    通道3: roll_angle_Kd (角度环微分系数)
+    通道4: speed_Kp (速度环比例系数)
+    通道5: line_kp (线路跟踪比例系数)
+    通道6: line_kd (线路跟踪微分系数)
+    通道7: line_squart_kp (线路跟踪平方项系数)
     """
-    global angle_kp, angle_kd, roll_angle_Kp, speed_Kp
-    global line_kp, line_kd, speed_Kd, TARGET_SPEED
+    global angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp
+    global line_kp, line_kd, line_squart_kp
     global wifi_data, motor1, motor2
     global pid_angle_speed, pid_angle, pid_speed, pid_line
     
@@ -381,7 +383,7 @@ def update_wifi_parameters():
     try:
         # 数据解析
         data_flag = wifi.data_analysis()
-        
+
         # 检查各通道是否有数据更新
         for i in range(8):
             if data_flag[i]:
@@ -389,28 +391,30 @@ def update_wifi_parameters():
         
         # 更新参数
         angle_kp = wifi_data[0]          # 角速度环比例系数
-        angle_kd = wifi_data[1]          # 角速度环微分系数
+        speed_Kd = wifi_data[1]          # 速度环微分系数
         roll_angle_Kp = wifi_data[2]     # 角度环比例系数
-        speed_Kp = wifi_data[3]          # 速度环比例系数
-        line_kp = wifi_data[4]           # 线路跟踪比例系数
-        line_kd = wifi_data[5]           # 线路跟踪微分系数
-        speed_Kd = wifi_data[6]          # 速度环微分系数
-        TARGET_SPEED = wifi_data[7]      # 目标速度
+        roll_angle_Kd = wifi_data[3]     # 角度环微分系数
+        speed_Kp = wifi_data[4]          # 速度环比例系数
+        line_kp = wifi_data[5]           # 线路跟踪比例系数
+        line_kd = wifi_data[6]           # 线路跟踪微分系数
+        line_squart_kp = wifi_data[7]    # 线路跟踪平方项系数
         
         # 更新PID控制器参数
         pid_angle_speed.kp = angle_kp
-        pid_angle_speed.kd = angle_kd
+        pid_angle_speed.kd = angle_kd  # 保持原有的angle_kd值
         pid_angle.kp = roll_angle_Kp
+        pid_angle.kd = roll_angle_Kd
         pid_speed.kp = speed_Kp
         pid_speed.kd = speed_Kd
         pid_line.kp = line_kp
         pid_line.kd = line_kd
+        pid_line.kp_squart = line_squart_kp
         
         # 发送示波器数据 - 显示角度和速度相关信息
         # 计算当前速度（编码器平均值）
         current_speed = -(kalman_l.output + kalman_r.output) / 2
         wifi.send_oscilloscope(
-            imu_data_obj.Pitch, current_speed, pid_speed.err_sum, TARGET_SPEED, imu_data_obj.Pitch)
+            imu_data_obj.Pitch, current_speed, pid_speed.err_sum, speed_Kd, imu_data_obj.Pitch)
     
     except:
         pass
@@ -977,6 +981,7 @@ def middle_sideline():
     global Trk, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     global ring_state, ring_left, ring_right, cross_flag
     global effective_middleline1, effective_middleline2
+    global cross_count
     
     # CCD2中线计算
     if CCD2_left_flag and CCD2_right_flag:
@@ -988,33 +993,35 @@ def middle_sideline():
     elif not CCD2_left_flag and CCD2_right_flag:
         Trk.middle_sideline2 = (0 + Trk.right_sideline2) / 2.0
     else:
+        Trk.middle_sideline2 = 64
         pass  # Trk.middle_sideline2保持不变
 
     # 基础中线计算
     # CCD1中线计算
     if CCD1_left_flag and CCD1_right_flag:
         # 双边都有效，正常计算
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 + 3
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
         effective_middleline1 = Trk.middle_sideline1
     elif CCD1_left_flag and not CCD1_right_flag:
         # 左边有效，右边丢线，使用上次右边界值计算中线
-        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1_last) / 2.0 + 3
+        Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1_last) / 2.0 
     elif not CCD1_left_flag and CCD1_right_flag:
         # 右边有效，左边丢线，使用上次左边界值计算中线
-        Trk.middle_sideline1 = (Trk.left_sideline1_last +Trk.right_sideline1) / 2.0 + 3 
+        Trk.middle_sideline1 = (Trk.left_sideline1_last +Trk.right_sideline1) / 2.0
     else:
-    #     # 近端CCD双边都丢线，检查远端CCD是否有边界
-    #     if CCD2_left_flag and CCD2_right_flag:
-    #         # 远端CCD双边都有效，使用远端中线
+    # #     # 近端CCD双边都丢线，检查远端CCD是否有边界
+    # #     if CCD2_left_flag and CCD2_right_flag:
+    # #         # 远端CCD双边都有效，使用远端中线
+        cross_flag=1
         Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0 #     elif CCD2_left_flag and not CCD2_right_flag:
-    #         # 远端CCD左边有效，右边丢线
-    #         Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2_last) / 2.0
-    #     elif not CCD2_left_flag and CCD2_right_flag:
-    #         # 远端CCD右边有效，左边丢线
-    #         Trk.middle_sideline1 = (Trk.left_sideline2_last + Trk.right_sideline2) / 2.0
-    #     else:
-    #         # 远端CCD也双边丢线，保持上次中线值
-    #         pass  # Trk.middle_sideline1保持不变
+    # #         # 远端CCD左边有效，右边丢线
+    # #         Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2_last) / 2.0
+    # #     elif not CCD2_left_flag and CCD2_right_flag:
+    # #         # 远端CCD右边有效，左边丢线
+    # #         Trk.middle_sideline1 = (Trk.left_sideline2_last + Trk.right_sideline2) / 2.0
+    # #     else:
+    # #         # 远端CCD也双边丢线，保持上次中线值
+    # #         pass  # Trk.middle_sideline1保持不变
     
     # 宽度计算
     Trk.width1 = Trk.right_sideline1 - Trk.left_sideline1
@@ -1026,7 +1033,7 @@ def middle_sideline():
     
     # # 十字路口中线特殊处理
     # # 十字路口期间，根据边界情况选择循迹策略
-    # if cross_flag:
+    if cross_flag:
     #     # 检查远端和近端是否都有边界
     #     if CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag:
     #         # 远端和近端都有边界，使用平均中线来循迹
@@ -1037,11 +1044,10 @@ def middle_sideline():
     #         pass
     #     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
 
-    if cross_flag:
-        if CCD2_left_flag and CCD2_right_flag and abs(Trk.left_sideline2 - Trk.right_sideline2)<40:   
-            Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
-        else:
-            pass
+        Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
+        if (CCD1_left_flag and CCD1_right_flag):
+            cross_flag=0
+        
 
 
     # # 左环岛处理
@@ -1321,7 +1327,7 @@ def ring_detection():
 def cross_detection():
     """十字路口检测 - 移植参考代码的检测策略"""
     global cross_flag, cross_encoder, encoder_integral
-    global pre_cross_flag
+    global pre_cross_flag,cross_count
     global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     global ring_state, ring_left, ring_right
     global cross_delay_encoder, black_write_2, TARGET_SPEED, original_target_speed
@@ -1338,6 +1344,7 @@ def cross_detection():
             and (not CCD1_left_flag) and (not CCD1_right_flag)):
             cross_encoder = encoder_integral  # 记录预十字检测时的编码器值 
             pre_cross_flag = False
+            cross_count+=1
             cross_flag = True
             set_beep_short()
              # 十字路口提速到75
@@ -1701,5 +1708,56 @@ while True:
     
     gc.collect()
 
-
-
+#   /*
+#  * **************************************************************************
+#  * ********************                                  ********************
+#  * ********************      COPYRIGHT INFORMATION       ********************
+#  * ********************                                  ********************
+#  * **************************************************************************
+#  *                                                                          *
+#  *                                   _oo8oo_                                *
+#  *                                  o8888888o                               *
+#  *                                  88" . "88                               *
+#  *                                  (| -_- |)                               *
+#  *                                  0\  =  /0                               *
+#  *                                ___/'==='\___                             *
+#  *                              .' \\|     |// '.                           *
+#  *                             / \\|||  :  |||// \                          *
+#  *                            / _||||| -:- |||||_ \                         *
+#  *                           |   | \\\  -  /// |   |                        *
+#  *                           | \_|  ''\---/''  |_/ |                        *
+#  *                           \  .-\__  '-'  __/-.  /                        *
+#  *                         ___'. .'  /--.--\  '. .'___                      *
+#  *                      ."" '<  '.___\_<|>_/___.'  >' "".                   *
+#  *                     | | :  `- \`.:`\ _ /`:.`/ -`  : | |                  *
+#  *                     \  \ `-.   \_ __\ /__ _/   .-` /  /                  *
+#  *                 =====`-.____`.___ \_____/ ___.`____.-`=====              *
+#  *                                   `=---=`                                *
+#  * **************************************************************************
+#  * ********************                                  ********************
+#  * ********************      	佛祖保佑 永远无BUG		  ********************
+#  * ********************                                  ********************
+#  * **************************************************************************
+#  */
+ 
+#   /***********************************************************
+# //         ！！         机    魂    大     悦            ！！
+# //                       .::::.
+# //                     .::::::::.
+# //                    :::::::::::
+# //                 ..:::::::::::'
+# //              '::::::::::::'
+# //                .::::::::::
+# //           '::::::::::::::..
+# //                ..::::::::::::.
+# //              ``::::::::::::::::
+# //               ::::``:::::::::'        .:::.
+# //              ::::'   ':::::'       .::::::::.
+# //            .::::'      ::::     .:::::::'::::.
+# //           .:::'       :::::  .:::::::::' ':::::.
+# //          .::'        :::::.:::::::::'      ':::::.
+# //         .::'         ::::::::::::::'         ``::::.
+# //     ...:::           ::::::::::::'              ``::.
+# //    ```` ':.          ':::::::::'                  ::::..
+# //                       '.:::::'                    ':'````..
+# ***************************************************************/
