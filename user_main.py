@@ -8,7 +8,7 @@ import math
 
 # 开关  #False #True
 wifi_en = False   
-element_en = False
+element_en = True
 
 cross_count=0
 
@@ -19,7 +19,6 @@ if wifi_en:
     try:
         wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
-        time.sleep_ms(500)
         wifi_enabled = True
         print("WiFi调参模块初始化成功")
     except Exception as e:
@@ -46,29 +45,22 @@ ccd_ticker_count = 0
 line_deviation = 0  # 线路偏差
 line_control_output = 0  # 线路控制输出
 
-# 按键相关变量
-key = KEY_HANDLER(10)  # 按键扫描周期为10
-
 # CCD算法参数 - 移植自C语言示例
 CCD1_SET_WIDTH = 32  # 近端CCD设定宽度
 CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 
-# 阈值参数 - 需要调试
-# CCD阈值参数 - 根据参考代码优化
-# 梯度检测阈值倍数：控制边界检测灵敏度 (参考值: 20-50)
-# - 值越小越灵敏，容易检测到边界但可能误判
-# - 值越大越保守，不易误判但可能漏检
+# 阈值参数
 THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
-# PID参数 - 进一步增强响应强度
+# PID参数
 angle_kp = -3605 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -450
 
 roll_angle_Kp = 0.062 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.1012 #0.0826 
+roll_angle_Kd = 0.0905 #0.0826 
 
 speed_Kp = 0.47 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
@@ -82,9 +74,7 @@ line_kd = 1940 # 适当减小微分系数，减少直线震荡
 TARGET_SPEED = 70  # 目标速度   
 med_roll_angle = 64.3  # 调整平衡角度
 
-# 二值化阈值百分比：控制黑白场景判断 (参考值: 30-60)
-# - 用于判断当前区域是否为黑色场景(起跑线、停车区等)
-# - 值越小越容易判断为黑色场景
+# 二值化阈值
 THRESHOLD_1 = 2400      
 THRESHOLD_2 = 1700
 
@@ -1415,8 +1405,8 @@ def element_detection():
     if not element_en:
         return  # 元素识别关闭，直接返回  
     
-    if not cross_flag:  # 十字路口期间不检测环岛
-        ring_detection()
+    # if not cross_flag:  # 十字路口期间不检测环岛
+    #     ring_detection()
 
     # if ring_state == NO_RING:
     #     cross_detection()
@@ -1470,7 +1460,7 @@ ccd_data_lower = None
 def ccd_process(timer):
     """CCD数据处理函数，独立定时器运行 - 只处理CCD算法，不包含显示"""
     global ccd_ticker_flag, ccd_ticker_count, line_deviation, line_control_output
-    global key, ccd_data_upper, ccd_data_lower
+    global ccd_data_upper, ccd_data_lower
     
     ccd_ticker_flag = True
     ccd_ticker_count = (ccd_ticker_count + 1) % 100
@@ -1518,7 +1508,7 @@ pit3 = ticker(3)
 pit2 = ticker(2)  # CCD处理定时器
 pit1.capture_list(imu)
 pit3.capture_list(encoder_l, encoder_r)
-pit2.capture_list(ccd, key)  # CCD定时器捕获CCD和按键
+pit2.capture_list(ccd)  # CCD定时器捕获CCD和按键
 pit1.callback(control_loop)
 pit3.callback(encoder_update)
 pit2.callback(ccd_process)  # CCD处理回调
