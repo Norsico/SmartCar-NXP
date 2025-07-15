@@ -113,6 +113,10 @@ motor1_filtered = 0.0  # 滤波后的角速度控制输出值
 I_ex = I_ey = I_ez = 0.0    # 积分误差
 delta_T = 0.001
 param_Kp, param_Ki = 18.0, 0.008  # 适当降低姿态解算增益
+ccd_data_upper = None
+ccd_data_lower = None
+display_counter = 0 # 显示更新计数器 - 控制显示更新频率
+CCD_DISPLAY = True
 
 # WiFi调参数据（最多8通道参数）
 wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
@@ -508,51 +512,7 @@ def imu_init():
     for i in range(3):
         Filter_data[i] /= 1000
 
-def control_loop(timer):
-    global ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, gyro_z_control
-    global motor1_filtered, motor1_filter_alpha
-    global encoder_l_filtered, encoder_r_filtered
 
-    ticker_count = (ticker_count + 1) % 10
-
-    # 1ms: 角速度控制
-    imu_data = imu.get()
-    imu_process()
-    
-    # 角速度控制输出
-    motor1_raw = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
-    
-    # 对角速度控制输出进行低通滤波
-    motor1_filtered = motor1_filter_alpha * motor1_raw + (1 - motor1_filter_alpha) * motor1_filtered
-    motor1 = motor1_filtered
-
-    # 偏航角速度抑制控制
-    gyro_z_control = gyro_z_controller.update(imu_data_obj.gyro_z)
-    
-    motor2 = motor1
-    # CCD巡线控制
-    motor1 += line_control_output  # 左电机增加转向控制
-    motor2 -= line_control_output  # 右电机减少转向控制
-    
-    # 偏航角速度抑制控制（双电机差速）
-    motor1 += gyro_z_control  # 左电机增加偏航抑制
-    motor2 -= gyro_z_control  # 右电机减少偏航抑制
-    
-    motor1 = limit(motor1, -8888, 8888)  # 增加电机输出限制，提高响应强度
-    motor2 = limit(motor2, -8888, 8888)  # 增加电机输出限制，提高响应强度
-    
-    motor_l.duty(-motor1)
-    motor_r.duty(-motor2)
-
-    # 2ms: 角度控制
-    if ticker_count % 2 == 0:
-        angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
-    
-    # 5ms: 速度控制
-    if ticker_count % 5 == 0:
-        avg_speed = -(encoder_l_filtered + encoder_r_filtered) / 2
-        speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
-        speed_1 = limit(speed_1, -10, 10)
 
 def encoder_update(timer):
     global encoder_integral, encoder_l_filtered, encoder_r_filtered, encoder_filter_alpha
@@ -813,6 +773,197 @@ def ccd_curvature_calc():
                             (abs(Trk.right_sideline2 - center) * CCD1_SET_WIDTH / CCD2_SET_WIDTH))
     
 
+def ccd_process(timer):
+    """CCD数据处理函数，独立定时器运行 - 只处理CCD算法，不包含显示"""
+    global line_deviation, line_control_output
+    global ccd_data_upper, ccd_data_lower
+    
+    # CCD数据处理
+    try:
+        # 读取双CCD数据 - 注意：近端ccd.get(1)，远端ccd.get(0)
+        ccd_data_upper = ccd.get(0)  # 远端CCD
+        ccd_data_lower = ccd.get(1)  # 近端CCD
+        
+        # 使用新的CCD处理算法 - 参数顺序：近端，远端
+        if ccd_data_upper or ccd_data_lower:
+            ccd_processing(ccd_data_lower, ccd_data_upper)
+            
+            # 只使用近端CCD巡线
+            center = MIDDLE_LINE
+            if CCD1_left_flag or CCD1_right_flag:
+                # 近端CCD有边界，使用近端CCD巡线
+                deviation1 = Trk.middle_sideline1 - center
+                line_deviation = deviation1
+            else:
+                # 近端CCD失效，保持上次偏差并逐渐衰减
+                line_deviation *= 0.95  # 逐渐衰减，避免持续偏移
+                
+            # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
+            raw_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
+            
+            # 限制线路控制输出
+            raw_control_output = limit(raw_control_output, -6666, 6666)
+            
+            # 对控制输出进行低通滤波，减少电机控制突变
+            global line_output_filtered, line_output_filter_alpha
+            line_output_filtered = line_output_filter_alpha * raw_control_output + (1 - line_output_filter_alpha) * line_output_filtered
+            
+            # 将滤波后的值赋给最终的控制输出
+            line_control_output = line_output_filtered
+            
+    except Exception as e:
+        # 发生错误时逐渐减小控制输出，避免突然停止
+        line_control_output *= 0.9
+
+def ccd_processing(ccd_data1, ccd_data2):
+    # 1. CCD数据获取和预处理
+    ccd1_get(ccd_data1)  # 近端CCD
+    ccd2_get(ccd_data2)  # 远端CCD
+    # 2. 边界检测
+    left_right_sideline(ccd_data1, ccd_data2)
+    # 3. 曲率计算
+    ccd_curvature_calc()
+    # 4. 元素检测
+    element_detection()
+    # 5. 中线计算
+    middle_sideline()
+
+def flash_detection():
+    """避障闪躲检测函数"""
+    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
+    global black_write_1, black_write_2
+    global flash_flag, flash_encoder, pre_flash_flag, encoder_integral
+    global left_flash_flag,right_flash_flag
+    
+    # 预判断
+    if ((not pre_flash_flag) and (not flash_flag)):
+        # 左障碍
+        if (Trk.left_sideline2-Trk.left_sideline2_last>10 and Trk.middle_sideline2>60
+            and Trk.right_qulu<20 and abs(Trk.right_sideline1-Trk.left_sideline1)<90 
+            and (not black_write_2)):
+            flash_encoder = encoder_integral
+            pre_flash_flag = True
+            left_flash_flag = True
+            set_beep_short() # 短响一声
+        # # 右障碍
+        # elif ((abs(Trk.right_sideline2-Trk.left_sideline2)<20) or (
+        #     Trk.right_sideline2_last-Trk.right_sideline2>10) 
+        #     and Trk.left_qulu<10 and (not black_write_2)):
+        #     flash_encoder = encoder_integral
+        #     pre_flash_flag = True
+        #     right_flash_flag = True
+
+    # 正式判断
+    elif (pre_flash_flag and (not flash_flag)):
+        # 左障碍
+        if left_flash_flag: 
+            if (abs(flash_encoder-encoder_integral)<15 and 
+                Trk.right_qulu<20 and (abs(Trk.right_sideline1-Trk.left_sideline1)<40 or 
+                (Trk.left_sideline1-Trk.left_sideline1_last>15))) and not black_write_2:
+                flash_encoder = encoder_integral
+                pre_flash_flag = False
+                flash_flag = True
+                set_beep_double_short() # 短响一声
+                
+            elif (abs(flash_encoder-encoder_integral)>20 or Trk.right_qulu>20):
+                pre_flash_flag = False
+                left_flash_flag = False
+        # 右障碍
+        if right_flash_flag:
+            pass
+
+    # 退出
+    elif ((not pre_flash_flag) and flash_flag):
+        if left_flash_flag:
+           if (abs(flash_encoder-encoder_integral)>20):
+                pre_flash_flag = False
+                flash_flag = False
+                left_flash_flag = False 
+
+
+def ring_detection():
+    global ring_state, ring_left, ring_right
+    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
+    global black_write_1, black_write_2
+    global ring_encoder, encoder_integral
+    global imu_data_obj  # 使用IMU数据
+    
+    if ring_state == NO_RING: 
+        # 检测左环岛 - 阶段1：远端左侧丢线，近端左侧不丢线
+        if (CCD1_left_flag and CCD1_right_flag and CCD2_right_flag and (not CCD2_left_flag) 
+            and (not black_write_2)):
+            ring_encoder = encoder_integral
+            ring_state = FIND_RING
+            ring_left = True
+        if ((not CCD1_right_flag) and (not CCD1_left_flag)):
+            ring_state = NO_RING
+            ring_left = False
+
+    elif ring_state == FIND_RING:
+        # 阶段1→2：左环岛确认第二阶段：近端左侧丢线，远端左侧不丢线
+        if ((not CCD1_left_flag) and CCD1_right_flag and CCD2_right_flag and CCD2_left_flag 
+            and (not black_write_2)
+            and abs(ring_encoder - encoder_integral) <= 30):
+            set_beep_short()
+            ring_encoder = encoder_integral
+            ring_state = FIND_RING_STAGE2
+        elif (abs(ring_encoder - encoder_integral) > 30 or ((not CCD1_right_flag) and (not CCD1_left_flag))):  # 如果走了太远还没满足条件，可能是误判
+            ring_state = NO_RING
+            ring_left = False
+            
+    elif ring_state == FIND_RING_STAGE2:
+        # 阶段2→3：左环岛确认第三阶段：远端左侧丢线
+        if (CCD1_right_flag and CCD2_right_flag and (not CCD2_left_flag)
+            and (not black_write_2)
+            and abs(ring_encoder - encoder_integral) <= 40):
+            ring_encoder = encoder_integral
+            ring_state = READY_IN_RING
+            global THRESHOLD_MULTIPLE_1
+            THRESHOLD_MULTIPLE_1 = 20  
+        elif (abs(ring_encoder - encoder_integral) > 40 or ((not CCD1_right_flag) and (not CCD1_left_flag))):  # 如果走了太远还没满足条件，可能是误判
+            ring_state = NO_RING
+            ring_left = False
+            
+    elif ring_state == READY_IN_RING:
+        # 阶段2→3：准备进入环岛 -> 在环岛中
+        if abs(ring_encoder - encoder_integral) >= 30:
+            ring_state = IN_RING
+            set_beep_long()
+                
+    elif ring_state == IN_RING:
+        # 阶段3→4：在环岛中 -> 准备出环岛
+        if ((not black_write_2) and (not CCD2_left_flag) and (not CCD2_right_flag)):
+            ring_encoder = encoder_integral
+            ring_state = READY_OUT_RING
+                
+    elif ring_state == READY_OUT_RING:
+        # 阶段4→5：准备出环岛 -> 出环岛
+        if abs(ring_encoder - encoder_integral) > 30:
+            ring_encoder = encoder_integral
+            ring_state = OUT_RING   
+            set_beep_long()  # 出环岛：长响一声
+                
+    elif ring_state == OUT_RING:
+        # 阶段5→6：出环岛 -> 准备回到无环岛
+        if abs(ring_encoder - encoder_integral) > 30:
+            ring_state = NO_RING
+            ring_left = False
+            global THRESHOLD_MULTIPLE_1
+            THRESHOLD_MULTIPLE_1 = 51
+
+def element_detection():
+    """元素检测主函数 - 直接使用边界检测算法结果"""
+    # 检查元素识别开关
+    if not element_en:
+        return  # 元素识别关闭，直接返回  
+    
+    if not cross_flag:  # 十字路口期间不检测环岛
+        ring_detection()
+
+    # if not cross_flag and ring_state == NO_RING:
+    #     flash_detection()
+
+
 def middle_sideline():
     """中线计算 - 包含环岛特殊处理逻辑"""
     global Trk, CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
@@ -908,200 +1059,51 @@ def middle_sideline():
     #             pass
     
 
-def ring_detection():
-    global ring_state, ring_left, ring_right
-    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
-    global black_write_1, black_write_2
-    global ring_encoder, encoder_integral
-    global imu_data_obj  # 使用IMU数据
+def control_loop(timer):
+    global ticker_count, speed_1, angle_1, motor1, motor2, imu_data, line_control_output, gyro_z_control
+    global motor1_filtered, motor1_filter_alpha
+    global encoder_l_filtered, encoder_r_filtered
+
+    ticker_count = (ticker_count + 1) % 10
+
+    # 1ms: 角速度控制
+    imu_data = imu.get()
+    imu_process()
     
-    if ring_state == NO_RING: 
-        # 检测左环岛 - 阶段1：远端左侧丢线，近端左侧不丢线
-        if (CCD1_left_flag and CCD1_right_flag and CCD2_right_flag and (not CCD2_left_flag) 
-            and (not black_write_2)):
-            ring_encoder = encoder_integral
-            ring_state = FIND_RING
-            ring_left = True
-        if ((not CCD1_right_flag) and (not CCD1_left_flag)):
-            ring_state = NO_RING
-            ring_left = False
-
-    elif ring_state == FIND_RING:
-        # 阶段1→2：左环岛确认第二阶段：近端左侧丢线，远端左侧不丢线
-        if ((not CCD1_left_flag) and CCD1_right_flag and CCD2_right_flag and CCD2_left_flag 
-            and (not black_write_2)
-            and abs(ring_encoder - encoder_integral) <= 30):
-            set_beep_short()
-            ring_encoder = encoder_integral
-            ring_state = FIND_RING_STAGE2
-        elif (abs(ring_encoder - encoder_integral) > 30 or ((not CCD1_right_flag) and (not CCD1_left_flag))):  # 如果走了太远还没满足条件，可能是误判
-            ring_state = NO_RING
-            ring_left = False
-            
-    elif ring_state == FIND_RING_STAGE2:
-        # 阶段2→3：左环岛确认第三阶段：远端左侧丢线
-        if (CCD1_right_flag and CCD2_right_flag and (not CCD2_left_flag)
-            and (not black_write_2)
-            and abs(ring_encoder - encoder_integral) <= 40):
-            ring_encoder = encoder_integral
-            ring_state = READY_IN_RING
-            global THRESHOLD_MULTIPLE_1
-            THRESHOLD_MULTIPLE_1 = 20  
-        elif (abs(ring_encoder - encoder_integral) > 40 or ((not CCD1_right_flag) and (not CCD1_left_flag))):  # 如果走了太远还没满足条件，可能是误判
-            ring_state = NO_RING
-            ring_left = False
-            
-    elif ring_state == READY_IN_RING:
-        # 阶段2→3：准备进入环岛 -> 在环岛中
-        if abs(ring_encoder - encoder_integral) >= 30:
-            ring_state = IN_RING
-            set_beep_long()
-                
-    elif ring_state == IN_RING:
-        # 阶段3→4：在环岛中 -> 准备出环岛
-        if ((not black_write_2) and (not CCD2_left_flag) and (not CCD2_right_flag)):
-            ring_encoder = encoder_integral
-            ring_state = READY_OUT_RING
-                
-    elif ring_state == READY_OUT_RING:
-        # 阶段4→5：准备出环岛 -> 出环岛
-        if abs(ring_encoder - encoder_integral) > 30:
-            ring_encoder = encoder_integral
-            ring_state = OUT_RING   
-            set_beep_long()  # 出环岛：长响一声
-                
-    elif ring_state == OUT_RING:
-        # 阶段5→6：出环岛 -> 准备回到无环岛
-        if abs(ring_encoder - encoder_integral) > 30:
-            ring_state = NO_RING
-            ring_left = False
-            global THRESHOLD_MULTIPLE_1
-            THRESHOLD_MULTIPLE_1 = 51
-
-def flash_detection():
-    """避障闪躲检测函数"""
-    global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
-    global black_write_1, black_write_2
-    global flash_flag, flash_encoder, pre_flash_flag, encoder_integral
-    global left_flash_flag,right_flash_flag
+    # 角速度控制输出
+    motor1_raw = pid_angle_speed.update(angle_1, imu_data_obj.gyro_x)
     
-    # 预判断
-    if ((not pre_flash_flag) and (not flash_flag)):
-        # 左障碍
-        if (Trk.left_sideline2-Trk.left_sideline2_last>10 and Trk.middle_sideline2>60
-            and Trk.right_qulu<20 and abs(Trk.right_sideline1-Trk.left_sideline1)<90 
-            and (not black_write_2)):
-            flash_encoder = encoder_integral
-            pre_flash_flag = True
-            left_flash_flag = True
-            set_beep_short() # 短响一声
-        # # 右障碍
-        # elif ((abs(Trk.right_sideline2-Trk.left_sideline2)<20) or (
-        #     Trk.right_sideline2_last-Trk.right_sideline2>10) 
-        #     and Trk.left_qulu<10 and (not black_write_2)):
-        #     flash_encoder = encoder_integral
-        #     pre_flash_flag = True
-        #     right_flash_flag = True
+    # 对角速度控制输出进行低通滤波
+    motor1_filtered = motor1_filter_alpha * motor1_raw + (1 - motor1_filter_alpha) * motor1_filtered
+    motor1 = motor1_filtered
 
-    # 正式判断
-    elif (pre_flash_flag and (not flash_flag)):
-        # 左障碍
-        if left_flash_flag: 
-            if (abs(flash_encoder-encoder_integral)<15 and 
-                Trk.right_qulu<20 and (abs(Trk.right_sideline1-Trk.left_sideline1)<40 or 
-                (Trk.left_sideline1-Trk.left_sideline1_last>15))) and not black_write_2:
-                flash_encoder = encoder_integral
-                pre_flash_flag = False
-                flash_flag = True
-                set_beep_double_short() # 短响一声
-                
-            elif (abs(flash_encoder-encoder_integral)>20 or Trk.right_qulu>20):
-                pre_flash_flag = False
-                left_flash_flag = False
-        # 右障碍
-        if right_flash_flag:
-            pass
-
-    # 退出
-    elif ((not pre_flash_flag) and flash_flag):
-        if left_flash_flag:
-           if (abs(flash_encoder-encoder_integral)>20):
-                pre_flash_flag = False
-                flash_flag = False
-                left_flash_flag = False 
-
-
-def element_detection():
-    """元素检测主函数 - 直接使用边界检测算法结果"""
-    # 检查元素识别开关
-    if not element_en:
-        return  # 元素识别关闭，直接返回  
+    # 偏航角速度抑制控制
+    gyro_z_control = gyro_z_controller.update(imu_data_obj.gyro_z)
     
-    if not cross_flag:  # 十字路口期间不检测环岛
-        ring_detection()
-
-    # if not cross_flag and ring_state == NO_RING:
-    #     flash_detection()
-
+    motor2 = motor1
+    # CCD巡线控制
+    motor1 += line_control_output  # 左电机增加转向控制
+    motor2 -= line_control_output  # 右电机减少转向控制
     
-def ccd_processing(ccd_data1, ccd_data2):
-    # 1. CCD数据获取和预处理
-    ccd1_get(ccd_data1)  # 近端CCD
-    ccd2_get(ccd_data2)  # 远端CCD
-    # 2. 边界检测
-    left_right_sideline(ccd_data1, ccd_data2)
-    # 3. 曲率计算
-    ccd_curvature_calc()
-    # 4. 元素检测
-    element_detection()
-    # 5. 中线计算
-    middle_sideline()
-
-
-ccd_data_upper = None
-ccd_data_lower = None
-
-def ccd_process(timer):
-    """CCD数据处理函数，独立定时器运行 - 只处理CCD算法，不包含显示"""
-    global line_deviation, line_control_output
-    global ccd_data_upper, ccd_data_lower
+    # 偏航角速度抑制控制（双电机差速）
+    motor1 += gyro_z_control  # 左电机增加偏航抑制
+    motor2 -= gyro_z_control  # 右电机减少偏航抑制
     
-    # CCD数据处理
-    try:
-        # 读取双CCD数据 - 注意：近端ccd.get(1)，远端ccd.get(0)
-        ccd_data_upper = ccd.get(0)  # 远端CCD
-        ccd_data_lower = ccd.get(1)  # 近端CCD
-        
-        # 使用新的CCD处理算法 - 参数顺序：近端，远端
-        if ccd_data_upper or ccd_data_lower:
-            ccd_processing(ccd_data_lower, ccd_data_upper)
-            
-            # 只使用近端CCD巡线
-            center = MIDDLE_LINE
-            if CCD1_left_flag or CCD1_right_flag:
-                # 近端CCD有边界，使用近端CCD巡线
-                deviation1 = Trk.middle_sideline1 - center
-                line_deviation = deviation1
-            else:
-                # 近端CCD失效，保持上次偏差并逐渐衰减
-                line_deviation *= 0.95  # 逐渐衰减，避免持续偏移
-                
-            # 使用PD控制器计算线路控制输出 - 参考C代码的控制逻辑
-            raw_control_output = pid_line.update(0, line_deviation)  # 目标偏差为0
-            
-            # 限制线路控制输出
-            raw_control_output = limit(raw_control_output, -6666, 6666)
-            
-            # 对控制输出进行低通滤波，减少电机控制突变
-            global line_output_filtered, line_output_filter_alpha
-            line_output_filtered = line_output_filter_alpha * raw_control_output + (1 - line_output_filter_alpha) * line_output_filtered
-            
-            # 将滤波后的值赋给最终的控制输出
-            line_control_output = line_output_filtered
-            
-    except Exception as e:
-        # 发生错误时逐渐减小控制输出，避免突然停止
-        line_control_output *= 0.9
+    motor1 = limit(motor1, -8888, 8888)  # 增加电机输出限制，提高响应强度
+    motor2 = limit(motor2, -8888, 8888)  # 增加电机输出限制，提高响应强度
+    
+    motor_l.duty(-motor1)
+    motor_r.duty(-motor2)
+
+    # 2ms: 角度控制
+    if ticker_count % 2 == 0:
+        angle_1 = pid_angle.update(med_roll_angle - speed_1, imu_data_obj.Pitch)
+    
+    # 5ms: 速度控制
+    if ticker_count % 5 == 0:
+        avg_speed = -(encoder_l_filtered + encoder_r_filtered) / 2
+        speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
+        speed_1 = limit(speed_1, -10, 10)
 
 # 初始化定时器
 pit1 = ticker(1)
@@ -1121,14 +1123,14 @@ pit1.start(1)
 pit2.start(4)
 pit3.start(5)
 
-
 # 系统启动完成
 print("init")
 
-# 显示更新计数器 - 控制显示更新频率
-display_counter = 0
 
-CCD_DISPLAY = True
+
+
+
+
 
 # 主循环
 while True:
