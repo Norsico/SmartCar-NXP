@@ -1016,20 +1016,7 @@ def middle_sideline():
     
     # # 十字路口中线特殊处理
     # # 十字路口期间，根据边界情况选择循迹策略
-    if cross_flag:
-    #     # 检查远端和近端是否都有边界
-    #     if CCD1_left_flag and CCD1_right_flag and CCD2_left_flag and CCD2_right_flag:
-    #         # 远端和近端都有边界，使用平均中线来循迹
-    #         Trk.middle_sideline1 = (Trk.middle_sideline1 + Trk.middle_sideline2) / 2.0
-    #     else:
-    #         # 没有四边界情况，使用近端中线
-    #         # 这里已经在基础中线计算中完成了，不需要额外处理
-    #         pass
-    #     # 如果是十字路口，使用CCD2的中线（这里可以根据需要添加十字处理）
 
-        Trk.middle_sideline1 = (Trk.left_sideline2 + Trk.right_sideline2) / 2.0
-        if (CCD1_left_flag and CCD1_right_flag):
-            cross_flag=0
         
 
 
