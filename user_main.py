@@ -43,7 +43,7 @@ speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控�
 speed_Kd = 0.55 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 27.1 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_kp = 26.1 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
 line_squart_kp = 0.46  # 减小平方项系数，避免过度响应
 line_kd = 1940 # 适当减小微分系数，减少直线震荡
 
@@ -815,19 +815,6 @@ def ccd_process(timer):
         # 发生错误时逐渐减小控制输出，避免突然停止
         line_control_output *= 0.9
 
-def ccd_processing(ccd_data1, ccd_data2):
-    # 1. CCD数据获取和预处理
-    ccd1_get(ccd_data1)  # 近端CCD
-    ccd2_get(ccd_data2)  # 远端CCD
-    # 2. 边界检测
-    left_right_sideline(ccd_data1, ccd_data2)
-    # 3. 曲率计算
-    ccd_curvature_calc()
-    # 4. 元素检测
-    element_detection()
-    # 5. 中线计算
-    middle_sideline()
-
 def flash_detection():
     """避障闪躲检测函数"""
     global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
@@ -1104,6 +1091,20 @@ def control_loop(timer):
         avg_speed = -(encoder_l_filtered + encoder_r_filtered) / 2
         speed_1 = pid_speed.update(TARGET_SPEED, avg_speed)
         speed_1 = limit(speed_1, -10, 10)
+
+def ccd_processing(ccd_data1, ccd_data2):
+    # 1. CCD数据获取和预处理
+    ccd1_get(ccd_data1)  # 近端CCD
+    ccd2_get(ccd_data2)  # 远端CCD
+    # 2. 边界检测
+    left_right_sideline(ccd_data1, ccd_data2)
+    # 3. 曲率计算
+    ccd_curvature_calc()
+    # 4. 元素检测
+    element_detection()
+    # 5. 中线计算
+    middle_sideline()
+
 
 # 初始化定时器
 pit1 = ticker(1)
