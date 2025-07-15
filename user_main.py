@@ -7,7 +7,7 @@ import time
 import math
 
 # 开关  #False #True
-wifi_en = True   
+wifi_en = False   
 element_en = True
 
 if wifi_en:
@@ -30,8 +30,13 @@ else:
 THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
+zhang_zuo = False
+zhang_you = True
+
+ring_1_yes_flag = False
+
 # PID参数
-angle_kp = -3605 #测过了 两个都是负的 kd不是正的
+angle_kp = -3915 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -450
 
@@ -44,9 +49,9 @@ speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控�
 speed_Kd = 0.55 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 19.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.32  # 减小平方项系数，避免过度响应
-line_kd = 1185 # 适当减小微分系数，减少直线震荡
+line_kp = 18.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.34  # 减小平方项系数，避免过度响应
+line_kd = 1000 # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 70  # 目标速度   
 med_roll_angle = 64.3  # 调整平衡角度
@@ -825,57 +830,73 @@ def flash_detection():
     global flash_flag, flash_encoder, pre_flash_flag, encoder_integral
     global left_flash_flag,right_flash_flag
     
-    # 预判断
-    if ((not pre_flash_flag) and (not flash_flag)):
-        # 左障碍
-        if (Trk.left_sideline2-Trk.left_sideline2_last>10 and Trk.middle_sideline2>60
-            and Trk.right_qulu<20 and abs(Trk.right_sideline1-Trk.left_sideline1)<90 
+    if (not flash_flag):
+        if ((Trk.right_sideline2_last-Trk.right_sideline2)> 10 
             and (not black_write_2)):
             flash_encoder = encoder_integral
-            pre_flash_flag = True
-            left_flash_flag = True
+            flash_flag = True
+            right_flash_flag = True
             set_beep_short() # 短响一声
-        # # 右障碍
-        # elif ((abs(Trk.right_sideline2-Trk.left_sideline2)<20) or (
-        #     Trk.right_sideline2_last-Trk.right_sideline2>10) 
-        #     and Trk.left_qulu<10 and (not black_write_2)):
-        #     flash_encoder = encoder_integral
-        #     pre_flash_flag = True
-        #     right_flash_flag = True
-
-    # 正式判断
-    elif (pre_flash_flag and (not flash_flag)):
-        # 左障碍
-        if left_flash_flag: 
-            if (abs(flash_encoder-encoder_integral)<15 and 
-                Trk.right_qulu<20 and (abs(Trk.right_sideline1-Trk.left_sideline1)<40 or 
-                (Trk.left_sideline1-Trk.left_sideline1_last>15))) and not black_write_2:
-                flash_encoder = encoder_integral
-                pre_flash_flag = False
-                flash_flag = True
-                set_beep_double_short() # 短响一声
-                
-            elif (abs(flash_encoder-encoder_integral)>20 or Trk.right_qulu>20):
-                pre_flash_flag = False
-                left_flash_flag = False
-        # 右障碍
+    elif flash_flag:
         if right_flash_flag:
-            pass
-
-    # 退出
-    elif ((not pre_flash_flag) and flash_flag):
-        if left_flash_flag:
-           if (abs(flash_encoder-encoder_integral)>20):
-                pre_flash_flag = False
+            if (abs(flash_encoder-encoder_integral)>10):
                 flash_flag = False
-                left_flash_flag = False 
+                right_flash_flag = False 
+
+    #         pre_flash_flag = True
+    #         left_flash_flag = True
+            
+
+    # 预判断
+    # if ((not pre_flash_flag) and (not flash_flag)):
+    #     # 左障碍
+    #     if (Trk.left_sideline2-Trk.left_sideline2_last>10 and Trk.middle_sideline2>60
+    #         and abs(Trk.right_sideline1-Trk.left_sideline1)<90 
+    #         and (not black_write_2)):
+    #         flash_encoder = encoder_integral
+    #         pre_flash_flag = True
+    #         left_flash_flag = True
+    #         set_beep_short() # 短响一声
+    #     # # 右障碍
+    #     # elif ((abs(Trk.right_sideline2-Trk.left_sideline2)<20) or (
+    #     #     Trk.right_sideline2_last-Trk.right_sideline2>10) 
+    #     #     and Trk.left_qulu<10 and (not black_write_2)):
+    #     #     flash_encoder = encoder_integral
+    #     #     pre_flash_flag = True
+    #     #     right_flash_flag = True
+
+    # # 正式判断
+    # elif (pre_flash_flag and (not flash_flag)):
+    #     # 左障碍
+    #     if left_flash_flag: 
+    #         if (abs(flash_encoder-encoder_integral)<15 and (abs(Trk.right_sideline1-Trk.left_sideline1)<40 or 
+    #             abs(Trk.left_sideline1-Trk.left_sideline1_last>15)) and (not black_write_2)):
+    #             flash_encoder = encoder_integral
+    #             pre_flash_flag = False
+    #             flash_flag = True
+    #             set_beep_double_short() # 短响一声
+                
+    #         elif (abs(flash_encoder-encoder_integral)>15 or Trk.right_qulu>30):
+    #             pre_flash_flag = False
+    #             left_flash_flag = False
+    #     # 右障碍
+    #     if right_flash_flag:
+    #         pass
+
+    # # 退出
+    # elif ((not pre_flash_flag) and flash_flag):
+    #     if left_flash_flag:
+    #        if (abs(flash_encoder-encoder_integral)>10):
+    #             pre_flash_flag = False
+    #             flash_flag = False
+    #             left_flash_flag = False 
 
 
 def ring_detection():
     global ring_state, ring_left, ring_right
     global CCD1_left_flag, CCD1_right_flag, CCD2_left_flag, CCD2_right_flag
     global black_write_1, black_write_2
-    global ring_encoder, encoder_integral
+    global ring_encoder, encoder_integral, ring_1_yes_flag
     global imu_data_obj  # 使用IMU数据
     
     if ring_state == NO_RING: 
@@ -928,18 +949,19 @@ def ring_detection():
                 
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
-        if abs(ring_encoder - encoder_integral) > 30:
+        if abs(ring_encoder - encoder_integral) > 25:
             ring_encoder = encoder_integral
             ring_state = OUT_RING   
             set_beep_long()  # 出环岛：长响一声
                 
     elif ring_state == OUT_RING:
         # 阶段5→6：出环岛 -> 准备回到无环岛
-        if abs(ring_encoder - encoder_integral) > 30:
+        if abs(ring_encoder - encoder_integral) > 20:
             ring_state = NO_RING
             ring_left = False
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = 51
+            ring_1_yes_flag = True
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
@@ -947,7 +969,7 @@ def element_detection():
     if not element_en:
         return  # 元素识别关闭，直接返回  
     
-    if not cross_flag:  # 十字路口期间不检测环岛
+    if not cross_flag and not ring_1_yes_flag:  # 十字路口期间不检测环岛
         ring_detection()
 
     # if not cross_flag and ring_state == NO_RING:
@@ -975,6 +997,11 @@ def middle_sideline():
     if CCD1_left_flag and CCD1_right_flag:
         cross_flag=0
         # 双边都有效，正常计算
+        # if zhang_zuo:
+        #     Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
+        # elif zhang_you:
+        #     Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0 - 10
+        # else:
         Trk.middle_sideline1 = (Trk.left_sideline1 + Trk.right_sideline1) / 2.0
     elif CCD1_left_flag and not CCD1_right_flag:
         cross_flag=0
@@ -1019,10 +1046,9 @@ def middle_sideline():
                 Trk.middle_sideline1 = Trk.right_sideline1 + 24
         elif ring_state == OUT_RING:
             Trk.middle_sideline1 = Trk.right_sideline1 -25
-
-    # if flash_flag:
-    #     if left_flash_flag or left_flash_flag:
-    #         Trk.middle_sideline1 = Trk.right_sideline1-10
+    if flash_flag:
+        if right_flash_flag:
+            Trk.middle_sideline1 = Trk.middle_sideline1-20
 
     
     # # 右环岛处理
@@ -1129,9 +1155,6 @@ pit3.start(5)
 
 # 系统启动完成
 print("init")
-
-
-
 
 
 
