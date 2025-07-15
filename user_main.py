@@ -24,23 +24,6 @@ if wifi_en:
 else:
     wifi_enabled = False
 
-# 全局变量
-PI = 3.14
-MIDDLE_LINE = 64
-
-Filter_data = [0, 0, 0]
-last_yaw = 0
-
-left_flash_flag = False
-right_flash_flag = False
-
-# CCD相关全局变量
-line_deviation = 0  # 线路偏差
-line_control_output = 0  # 线路控制输出
-
-# CCD算法参数 - 移植自C语言示例
-CCD1_SET_WIDTH = 32  # 近端CCD设定宽度
-CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 
 # 阈值参数
 THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
@@ -71,7 +54,13 @@ med_roll_angle = 64.3  # 调整平衡角度
 THRESHOLD_1 = 2400      
 THRESHOLD_2 = 2400
 
-# 环岛状态定义 - 参考C代码的7阶段状态机
+
+
+# 全局变量
+PI = 3.14
+MIDDLE_LINE = 64
+CCD1_SET_WIDTH = 32  # 近端CCD设定宽度
+CCD2_SET_WIDTH = 30  # 远端CCD设定宽度
 NO_RING = 0            # 无环岛
 FIND_RING = 1          # 发现环岛 
 FIND_RING_STAGE2 = 2   # 发现环岛第二阶段
@@ -79,28 +68,55 @@ READY_IN_RING = 3      # 准备进入环岛
 IN_RING = 4           # 在环岛中
 READY_OUT_RING = 5     # 准备出环岛
 OUT_RING = 6           # 出环岛 
-
-# 环岛相关全局变量
-ring_state = NO_RING
+BEEP_OFF = 0            # 蜂鸣器状态标志位
+BEEP_SHORT = 1
+BEEP_LONG = 2
+BEEP_ON = 3
+BEEP_DOUBLE_SHORT = 4
+Filter_data = [0, 0, 0]
+last_yaw = 0
+left_flash_flag = False
+right_flash_flag = False
+line_deviation = 0  # 线路偏差
+line_control_output = 0  # 线路控制输出
+ring_state = NO_RING    # 环岛相关全局变量
 ring_left = False
 ring_right = False
-
-# 编码器积分值（用于距离计算）
-encoder_integral = 0
+encoder_integral = 0    # 编码器积分值
 ring_encoder = 0        # 环岛编码器计数
-
-# 编码器低通滤波参数
-encoder_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
+encoder_filter_alpha = 0.3  # 编码器低通滤波参数
 encoder_l_filtered = 0.0    # 左编码器滤波后的值
 encoder_r_filtered = 0.0    # 右编码器滤波后的值
-
-# 十字
 cross_flag = False      # 十字标志
-
-# 避障闪躲相关全局变量
 flash_flag = False      # 闪躲标志
 flash_encoder = 0       # 闪躲编码器计数
 pre_flash_flag = False  # 预闪躲标志
+CCD1_left_flag = False  # 边界检测标志
+CCD1_right_flag = False
+CCD2_left_flag = False
+CCD2_right_flag = False
+black_write_1 = False   # 黑白场景标志
+black_write_2 = False
+beep_state = BEEP_OFF
+beep_timer = 0
+beep_double_count = 0
+gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
+angle_1 = speed_1 = motor1 = motor2 = 0
+ticker_count = 0
+gyro_z_control = 0  # 偏航角速度抑制控制输出
+middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
+middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
+line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
+line_output_filtered = 0.0  # 滤波后的控制输出值
+motor1_filter_alpha = 0.5  # 角速度控制输出滤波系数，0-1之间，越小滤波越强
+motor1_filtered = 0.0  # 滤波后的角速度控制输出值
+I_ex = I_ey = I_ez = 0.0    # 积分误差
+delta_T = 0.001
+param_Kp, param_Ki = 18.0, 0.008  # 适当降低姿态解算增益
+
+# WiFi调参数据（最多8通道参数）
+wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
+
 
 # CCD信息类
 class CCDInformation:
@@ -145,29 +161,8 @@ CCD1 = CCDInformation()  # 近端CCD
 CCD2 = CCDInformation()  # 远端CCD
 Trk = TrackInformation()  # 赛道信息
 
-# 边界检测标志
-CCD1_left_flag = False
-CCD1_right_flag = False
-CCD2_left_flag = False
-CCD2_right_flag = False
-
-# 黑白场景标志
-black_write_1 = False
-black_write_2 = False
-
 # 蜂鸣器初始化
 beep = Pin('D24', Pin.OUT, pull=Pin.PULL_UP_47K, value=False)
-
-# 蜂鸣器状态标志位
-BEEP_OFF = 0
-BEEP_SHORT = 1
-BEEP_LONG = 2
-BEEP_ON = 3
-BEEP_DOUBLE_SHORT = 4
-
-beep_state = BEEP_OFF
-beep_timer = 0
-beep_double_count = 0  # 双响计数器
 
 def beep_on():
     """蜂鸣器响"""
@@ -250,77 +245,26 @@ def beep_process():
 
 motor_l = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C28_DIR_C29, 13000, duty=0, invert=True)
 motor_r = MOTOR_CONTROLLER(MOTOR_CONTROLLER.PWM_C30_DIR_C31, 13000, duty=0, invert=False)
-
 encoder_l = encoder("C0", "C1", True)
 encoder_r = encoder("C2", "C3")
-
 imu = IMU660RX()
 imu_data = imu.get()
-
-# CCD初始化
-ccd = TSL1401(10)
+ccd = TSL1401(10)   # CCD初始化
 ccd.set_resolution(TSL1401.RES_12BIT)
-time.sleep_ms(500)  # CCD初始化延时
-
-# IPS200屏幕初始化
-# 定义片选引脚
 cs = Pin('B29', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
-# 拉高拉低一次 CS 片选确保屏幕通信时序正常
 cs.high()
 cs.low()
-# 定义控制引脚
 rst = Pin('B31', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
 dc = Pin('B5', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
 blk = Pin('C21', Pin.OUT, pull=Pin.PULL_UP_47K, value=1)
-# 新建 LCD 驱动实例
 drv = LCD_Drv(SPI_INDEX=2, BAUDRATE=60000000, DC_PIN=dc, RST_PIN=rst, LCD_TYPE=LCD_Drv.LCD200_TYPE)
-# 新建 LCD 实例
 lcd = LCD(drv)
-# color 接口设置屏幕显示颜色 [前景色,背景色]
-lcd.color(0xFFFF, 0x0000)
-# mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
-lcd.mode(0)
-# 清屏
-lcd.clear(0x0000)
-
-# 偏航角速度抑制参数
-gyro_z_kd = 0  # 偏航角速度D控制系数，抑制左右摆动
-
-# 控制变量
-angle_1 = speed_1 = motor1 = motor2 = 0
-
-# 保存原始目标速度
-original_target_speed = TARGET_SPEED
-
-ticker_count = 0
-gyro_z_control = 0  # 偏航角速度抑制控制输出
-
-# 中线低通滤波参数
-middle_line_filter_alpha = 0.3  # 滤波系数，0-1之间，越小滤波越强
-middle_line_filtered = MIDDLE_LINE  # 滤波后的中线值
-
-# 巡线控制输出低通滤波参数
-line_output_filter_alpha = 0.4  # 控制输出滤波系数，响应稍快一些
-line_output_filtered = 0.0  # 滤波后的控制输出值
-
-# 角速度控制输出低通滤波参数
-motor1_filter_alpha = 0.5  # 角速度控制输出滤波系数，0-1之间，越小滤波越强
-motor1_filtered = 0.0  # 滤波后的角速度控制输出值
-
-# WiFi调参数据存储 - 新的8通道参数
-wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
+lcd.color(0xFFFF, 0x0000)   # color 接口设置屏幕显示颜色 [前景色,背景色]
+lcd.mode(0) # mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
+lcd.clear(0x0000)   # 清屏
 
 def update_wifi_parameters():
-    """更新WiFi调参数据
-    通道0: angle_kp (角速度环比例系数)
-    通道1: speed_Kd (速度环微分系数)
-    通道2: roll_angle_Kp (角度环比例系数)
-    通道3: roll_angle_Kd (角度环微分系数)
-    通道4: speed_Kp (速度环比例系数)
-    通道5: line_kp (线路跟踪比例系数)
-    通道6: line_kd (线路跟踪微分系数)
-    通道7: line_squart_kp (线路跟踪平方项系数)
-    """
+
     global angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp
     global line_kp, line_kd, line_squart_kp
     global wifi_data, motor1, motor2
@@ -438,11 +382,6 @@ pid_line = LinePDController(line_kp, line_kd, line_squart_kp)  # 线路跟踪PD�
 gyro_z_controller = DController(gyro_z_kd)  # 偏航角速度抑制控制器
 imu_data_obj = IMUData()
 quaternion = Quaternion()
-
-# 积分误差
-I_ex = I_ey = I_ez = 0.0
-delta_T = 0.001
-param_Kp, param_Ki = 18.0, 0.008  # 适当降低姿态解算增益
 
 def limit(value, min_val, max_val):
     return max(min_val, min(value, max_val))
