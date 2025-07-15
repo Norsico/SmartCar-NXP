@@ -7,7 +7,7 @@ import time
 import math
 
 # 开关  #False #True
-wifi_en = False   
+wifi_en = True   
 element_en = True
 
 if wifi_en:
@@ -24,37 +24,38 @@ if wifi_en:
 else:
     wifi_enabled = False
 
+######################################################################################
 
 # 阈值参数
 THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
 THRESHOLD_MULTIPLE_2 = 54  # 远端适中
 
 # PID参数
-angle_kp = -3695 #测过了 两个都是负的 kd不是正的
+angle_kp = -3605 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -450
 
-roll_angle_Kp = 0.062 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.0621 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0905 #0.0826 
+roll_angle_Kd = 0.0902 #0.0826 
 
-speed_Kp = 0.4 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.37 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
 speed_Kd = 0.55 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 26.1 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.46  # 减小平方项系数，避免过度响应
-line_kd = 1940 # 适当减小微分系数，减少直线震荡
+line_kp = 19.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0.32  # 减小平方项系数，避免过度响应
+line_kd = 1185 # 适当减小微分系数，减少直线震荡
 
 TARGET_SPEED = 70  # 目标速度   
 med_roll_angle = 64.3  # 调整平衡角度
 
 # 二值化阈值
 THRESHOLD_1 = 2400      
-THRESHOLD_2 = 2400
+THRESHOLD_2 = 1800
 
-
+######################################################################################
 
 # 全局变量
 PI = 3.14
@@ -117,6 +118,8 @@ ccd_data_upper = None
 ccd_data_lower = None
 display_counter = 0 # 显示更新计数器 - 控制显示更新频率
 CCD_DISPLAY = True
+
+######################################################################################
 
 # WiFi调参数据（最多8通道参数）
 wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
