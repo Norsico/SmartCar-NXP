@@ -7,13 +7,13 @@ import time
 import math
 
 # 开关  #False #True
-wifi_en = False   
+wifi_en = False
 element_en = True
 
 if wifi_en:
     # WiFi调参初始化
     try:
-        wifi = WIFI_SPI("xyh", "1261340160xyh", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
+        wifi = WIFI_SPI("OnePlus 13", "1234567890xia", WIFI_SPI.TCP_CONNECT, "192.168.43.3", "8086")
         wifi.send_str("WiFi parameter tuning ready.\r\n")
         wifi_enabled = True
         print("WiFi调参模块初始化成功")
@@ -27,8 +27,8 @@ else:
 ######################################################################################
 
 # 阈值参数
-THRESHOLD_MULTIPLE_1 = 51  # 近端更灵敏
-THRESHOLD_MULTIPLE_2 = 54  # 远端适中
+THRESHOLD_MULTIPLE_1 = 25  # 近端更灵敏
+THRESHOLD_MULTIPLE_2 = 27  # 远端适中
 
 zhang_zuo = False
 zhang_you = True
@@ -36,25 +36,25 @@ zhang_you = True
 ring_1_yes_flag = False
 
 # PID参数
-angle_kp = -3915 #测过了 两个都是负的 kd不是正的
+angle_kp = -2600 #测过了 两个都是负的 kd不是正的
 angle_ki = 0
 angle_kd = -450
 
-roll_angle_Kp = 0.0621 #纯纯脑瘫角度环 调死我了
+roll_angle_Kp = 0.07 #纯纯脑瘫角度环 调死我了
 roll_angle_Ki = 0
-roll_angle_Kd = 0.0902 #0.0826 
+roll_angle_Kd = 0.1 #0.0826 
 
-speed_Kp = 0.37 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
+speed_Kp = 0.2 # 0.063 老铁我发现这东西不能给大 给大了就容易震动了 速度环参数给偏小一点 速度积分也是 跑起来效果就比大的好
 speed_Ki = 0 # 添加积分项，消除稳态误差，防止转弯时速度控制不准确
-speed_Kd = 0.55 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
+speed_Kd = 0.1 #0.136 # 1.7 给小了虽然到达预定速度的时间会变长但是到达之后毕竟参数小震荡肯定好点 还是选择稳定好 要速度快可以改预定速度
 
 # 线路跟踪PD控制器参数 - 参考C代码优化
-line_kp = 18.5 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
-line_squart_kp = 0.34  # 减小平方项系数，避免过度响应
-line_kd = 1000 # 适当减小微分系数，减少直线震荡
+line_kp = 10 # 增大比例系数，提高响应速度（参考C代码舵机控制强度）
+line_squart_kp = 0  # 减小平方项系数，避免过度响应
+line_kd = 900 # 适当减小微分系数，减少直线震荡
 
-TARGET_SPEED = 70  # 目标速度   
-med_roll_angle = 64.3  # 调整平衡角度
+TARGET_SPEED = 60  # 目标速度   
+med_roll_angle = 64.8  # 调整平衡角度
 
 # 二值化阈值
 THRESHOLD_1 = 2400      
@@ -127,8 +127,48 @@ CCD_DISPLAY = True
 ######################################################################################
 
 # WiFi调参数据（最多8通道参数）
-wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp, line_kp, line_kd, line_squart_kp]
+wifi_data = [angle_kp, speed_Kd, roll_angle_Kp, TARGET_SPEED, speed_Kp, line_kp, line_kd, line_squart_kp]
 
+def update_wifi_parameters():
+
+    global angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp
+    global line_kp, line_kd, line_squart_kp
+    global wifi_data, motor1, motor2
+    global pid_angle_speed, pid_angle, pid_speed, pid_line
+    global ring_state
+    global encoder_l_filtered, encoder_r_filtered
+    global TARGET_SPEED
+    
+    if not wifi_enabled:
+        return
+    
+    try:
+        # 数据解析
+        data_flag = wifi.data_analysis()
+
+        # 检查各通道是否有数据更新
+        for i in range(8):
+            if data_flag[i]:
+                wifi_data[i] = wifi.get_data(i)
+        
+        # 更新PID控制器参数
+        pid_angle_speed.kp = wifi_data[0]
+        pid_speed.kd = wifi_data[1]
+        pid_angle.kp = wifi_data[2]
+        TARGET_SPEED = wifi_data[3]
+        pid_speed.kp = wifi_data[4]
+        pid_line.kp = wifi_data[5]
+        pid_line.kd = wifi_data[6]
+        pid_line.kp_squart = wifi_data[7]
+        
+        # 发送示波器数据 - 显示角度和速度相关信息
+        # 计算当前速度（编码器平均值）
+        current_speed = -(encoder_l_filtered + encoder_r_filtered) / 2
+        wifi.send_oscilloscope(
+            Trk.left_qulu, imu_data_obj.Pitch, current_speed, ring_state)
+    
+    except:
+        pass
 
 # CCD信息类
 class CCDInformation:
@@ -274,57 +314,6 @@ lcd = LCD(drv)
 lcd.color(0xFFFF, 0x0000)   # color 接口设置屏幕显示颜色 [前景色,背景色]
 lcd.mode(0) # mode 接口设置屏幕显示模式 [0:竖屏,1:横屏,2:竖屏180旋转,3:横屏180旋转]
 lcd.clear(0x0000)   # 清屏
-
-def update_wifi_parameters():
-
-    global angle_kp, speed_Kd, roll_angle_Kp, roll_angle_Kd, speed_Kp
-    global line_kp, line_kd, line_squart_kp
-    global wifi_data, motor1, motor2
-    global pid_angle_speed, pid_angle, pid_speed, pid_line
-    global ring_state
-    global encoder_l_filtered, encoder_r_filtered
-    
-    if not wifi_enabled:
-        return
-    
-    try:
-        # 数据解析
-        data_flag = wifi.data_analysis()
-
-        # 检查各通道是否有数据更新
-        for i in range(8):
-            if data_flag[i]:
-                wifi_data[i] = wifi.get_data(i)
-        
-        # 更新参数
-        angle_kp = wifi_data[0]          # 角速度环比例系数
-        speed_Kd = wifi_data[1]          # 速度环微分系数
-        roll_angle_Kp = wifi_data[2]     # 角度环比例系数
-        roll_angle_Kd = wifi_data[3]     # 角度环微分系数
-        speed_Kp = wifi_data[4]          # 速度环比例系数
-        line_kp = wifi_data[5]           # 线路跟踪比例系数
-        line_kd = wifi_data[6]           # 线路跟踪微分系数
-        line_squart_kp = wifi_data[7]    # 线路跟踪平方项系数
-        
-        # 更新PID控制器参数
-        pid_angle_speed.kp = angle_kp
-        pid_angle_speed.kd = angle_kd  # 保持原有的angle_kd值
-        pid_angle.kp = roll_angle_Kp
-        pid_angle.kd = roll_angle_Kd
-        pid_speed.kp = speed_Kp
-        pid_speed.kd = speed_Kd
-        pid_line.kp = line_kp
-        pid_line.kd = line_kd
-        pid_line.kp_squart = line_squart_kp
-        
-        # 发送示波器数据 - 显示角度和速度相关信息
-        # 计算当前速度（编码器平均值）
-        current_speed = -(encoder_l_filtered + encoder_r_filtered) / 2
-        wifi.send_oscilloscope(
-            Trk.left_qulu, imu_data_obj.Pitch, current_speed, ring_state)
-    
-    except:
-        pass
 
 # PID控制器类
 class PIDController:
@@ -949,7 +938,7 @@ def ring_detection():
                 
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
-        if abs(ring_encoder - encoder_integral) > 25:
+        if abs(ring_encoder - encoder_integral) > 30:
             ring_encoder = encoder_integral
             ring_state = OUT_RING   
             set_beep_long()  # 出环岛：长响一声
@@ -961,7 +950,7 @@ def ring_detection():
             ring_left = False
             global THRESHOLD_MULTIPLE_1
             THRESHOLD_MULTIPLE_1 = 51
-            ring_1_yes_flag = True
+            # ring_1_yes_flag = True
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
@@ -1033,10 +1022,10 @@ def middle_sideline():
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 38
+                Trk.middle_sideline1 = Trk.left_sideline1 + 28
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.right_sideline1 + 32
+                Trk.middle_sideline1 = Trk.right_sideline1 + 22
         elif ring_state == READY_OUT_RING:
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
@@ -1134,6 +1123,7 @@ def ccd_processing(ccd_data1, ccd_data2):
     # 5. 中线计算
     middle_sideline()
 
+key = KEY_HANDLER(5) # 上Key4 下Key2
 
 # 初始化定时器
 pit1 = ticker(1)
@@ -1141,10 +1131,12 @@ pit2 = ticker(2)
 pit3 = ticker(3)
 pit1.capture_list(imu)
 pit2.capture_list(ccd) 
-pit3.capture_list(encoder_l, encoder_r)
+pit3.capture_list(encoder_l, encoder_r, key)
 pit1.callback(control_loop)
 pit2.callback(ccd_process)  
 pit3.callback(encoder_update)
+
+key_data = key.get()
 
 # 启动系统
 imu_init()
@@ -1155,8 +1147,6 @@ pit3.start(5)
 
 # 系统启动完成
 print("init")
-
-
 
 
 # 主循环
@@ -1277,8 +1267,8 @@ while True:
                 except:
                     pass
 
-    # 安全保护：非WiFi模式下，电机满转时停止
-    if not wifi_enabled and (current_speed > 260 or current_speed < -260):
+    # 安全保护
+    if (current_speed > 260 or current_speed < -260):
         
         # 停止所有定时器
         pit1.stop()
@@ -1286,14 +1276,18 @@ while True:
         pit2.stop()
         
         # 长响警告
-        set_beep_long()
-        beep_process()
+        # set_beep_long()
+        # beep_process()
 
         while True:
             # 立即停止电机
             motor_l.duty(0)
             motor_r.duty(0)
-        break  # 退出主循环
+            if key_data[3]:
+                print("key4 = {:>6d}.".format(key_data[3]))
+                key.clear(4)
+                print("退出")
+                break  # 退出主循环
     
     gc.collect()
 
