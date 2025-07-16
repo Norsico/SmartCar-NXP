@@ -64,7 +64,6 @@ THRESHOLD_2 = 1800
 ######################################################################################
 
 # 全局变量
-huan_encoder = 0
 PI = 3.14
 MIDDLE_LINE = 64
 CCD1_SET_WIDTH = 32  # 近端CCD设定宽度
@@ -841,10 +840,14 @@ def ring_detection():
     global black_write_1, black_write_2
     global ring_encoder, encoder_integral, ring_1_yes_flag
     global imu_data_obj  # 使用IMU数据
+    global TARGET_SPEED, med_roll_angle, THRESHOLD_MULTIPLE_2
+
+    Win = 196
+
     ring_time+=1
-    if 170 < encoder_integral < 175:
+    if Win-9 < encoder_integral < Win-6:
         set_beep_short()
-    if ring_state == NO_RING and encoder_integral>183: 
+    if ring_state == NO_RING and encoder_integral>Win+2: 
         # 检测左环岛 - 阶段1：远端左侧丢线，近端左侧不丢线
         # if (CCD1_left_flag and CCD1_right_flag and CCD2_right_flag and (not CCD2_left_flag) 
         #     and (not black_write_2)):
@@ -893,6 +896,8 @@ def ring_detection():
         if ((not CCD2_left_flag) and (not CCD2_right_flag)):
             ring_encoder = encoder_integral
             ring_state = READY_OUT_RING
+            THRESHOLD_MULTIPLE_2 = 38  # 远端适中
+            
                 
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
@@ -903,10 +908,14 @@ def ring_detection():
                 
     elif ring_state == OUT_RING:
         # 阶段5→6：出环岛 -> 准备回到无环岛
-        if abs(ring_encoder - encoder_integral) > 20:
+        if abs(ring_encoder - encoder_integral) > 35:
             ring_state = NO_RING
             ring_left = False
             ring_1_yes_flag = True
+            TARGET_SPEED = 70
+            med_roll_angle = 65.6
+            pid_angle.kp = 0.08 #0.075
+            THRESHOLD_MULTIPLE_2 = 28
 
 def element_detection():
     """元素检测主函数 - 直接使用边界检测算法结果"""
@@ -914,8 +923,8 @@ def element_detection():
     if not element_en:
         return  # 元素识别关闭，直接返回  
     
-    # if not cross_flag and not ring_1_yes_flag:  # 十字路口期间不检测环岛
-    #     ring_detection()
+    if not cross_flag and not ring_1_yes_flag:  # 十字路口期间不检测环岛
+        ring_detection()
 
     # if not cross_flag and ring_state == NO_RING:
     #     flash_detection()
@@ -973,17 +982,17 @@ def middle_sideline():
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 28
+                Trk.middle_sideline1 = Trk.left_sideline1 + 26
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.right_sideline1 + 22
+                Trk.middle_sideline1 = Trk.right_sideline1 + 20
         elif ring_state == READY_OUT_RING:
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 30
+                Trk.middle_sideline1 = Trk.left_sideline1 + 22
             else:
                 # 左边界丢失时，使用上次左边界位置
-                Trk.middle_sideline1 = Trk.right_sideline1 + 24
+                Trk.middle_sideline1 = Trk.right_sideline1 +15
         elif ring_state == OUT_RING:
             Trk.middle_sideline1 = Trk.right_sideline1 -25
     # if flash_flag:
