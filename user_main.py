@@ -842,7 +842,7 @@ def ring_detection():
     global imu_data_obj  # 使用IMU数据
     global TARGET_SPEED, med_roll_angle, THRESHOLD_MULTIPLE_2
 
-    Win = 196
+    Win = 175
 
     ring_time+=1
     if Win-9 < encoder_integral < Win-6:
@@ -887,7 +887,7 @@ def ring_detection():
             
     elif ring_state == READY_IN_RING:
         # 阶段2→3：准备进入环岛 -> 在环岛中
-        if abs(ring_encoder - encoder_integral) >= 30:
+        if abs(ring_encoder - encoder_integral) >= 40:
             ring_state = IN_RING
             set_beep_long()
                 
@@ -901,7 +901,7 @@ def ring_detection():
                 
     elif ring_state == READY_OUT_RING:
         # 阶段4→5：准备出环岛 -> 出环岛
-        if abs(ring_encoder - encoder_integral) > 50:
+        if abs(ring_encoder - encoder_integral) > 80:
             ring_encoder = encoder_integral
             ring_state = OUT_RING   
             set_beep_long()  # 出环岛：长响一声
@@ -982,19 +982,19 @@ def middle_sideline():
             # 环岛内部阶段：按左边缘循迹
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 26
+                Trk.middle_sideline1 = Trk.left_sideline1 + 20
             else:
                 # 左边界丢失时，使用上次左边界位置
                 Trk.middle_sideline1 = Trk.right_sideline1 + 20
         elif ring_state == READY_OUT_RING:
             if CCD1_left_flag:
                 # 有左边界时，沿左边缘行驶（偏移量设为正值，让小车靠近左边界）
-                Trk.middle_sideline1 = Trk.left_sideline1 + 22
+                Trk.middle_sideline1 = Trk.left_sideline1 + 20
             else:
                 # 左边界丢失时，使用上次左边界位置
                 Trk.middle_sideline1 = Trk.right_sideline1 +15
         elif ring_state == OUT_RING:
-            Trk.middle_sideline1 = Trk.right_sideline1 -25
+            Trk.middle_sideline1 = Trk.right_sideline1 -30
     # if flash_flag:
     #     if right_flash_flag:
     #         Trk.middle_sideline1 = Trk.middle_sideline1-20
